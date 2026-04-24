@@ -379,7 +379,9 @@ def _ollama_install_cmd() -> list[str]:
         return ["brew", "install", "ollama"]
     if system == "linux":
         return ["sh", "-c", "curl -fsSL https://ollama.ai/install.sh | sh"]
-    # Fallback — will likely fail, wizard prints manual instructions
+    if system == "windows" and shutil.which("winget"):
+        return ["winget", "install", "--id", "Ollama.Ollama", "-e", "--accept-source-agreements"]
+    # Fallback — will fail gracefully, wizard prints manual instructions
     return ["ollama", "--version"]
 
 
@@ -390,6 +392,8 @@ def _docker_install_cmd() -> list[str]:
         return ["brew", "install", "--cask", "docker"]
     if system == "linux":
         return ["sh", "-c", "curl -fsSL https://get.docker.com | sh"]
+    if system == "windows" and shutil.which("winget"):
+        return ["winget", "install", "--id", "Docker.DockerDesktop", "-e", "--accept-source-agreements"]
     return ["docker", "--version"]
 
 

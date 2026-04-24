@@ -185,11 +185,14 @@ class InstallProgress:
         step = self._step_map[key]
         base_desc = step.description
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        except FileNotFoundError:
+            return False, f"Command not found: {cmd[0]}"
 
         output_lines: list[str] = []
         last_printed_content = ""
