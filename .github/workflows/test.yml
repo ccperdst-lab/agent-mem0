@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Verify CLI entry point
+        run: |
+          agent-mem0 --version
+          agent-mem0 --help
+
+      - name: Verify subcommands
+        run: |
+          agent-mem0 install --help
+          agent-mem0 setup --help
+          agent-mem0 status --help
+          agent-mem0 uninstall --help
+
+      - name: Verify package imports
+        run: |
+          python -c "from agent_mem0 import __version__; print(f'version: {__version__}')"
+          python -c "from agent_mem0.config import load_config, DEFAULT_CONFIG; print('config OK')"
+          python -c "from agent_mem0.logger import setup_logger; print('logger OK')"
+
+      - name: Verify config defaults
+        run: |
+          python -c "
+          from agent_mem0.config import DEFAULT_CONFIG
+          mem = DEFAULT_CONFIG['memory']
+          assert mem['search_top_k'] == 20
+          assert mem['search_threshold'] == 0.3
+          assert mem['search_max_results'] == 10
+          assert mem['default_ttl_days'] == 30
+          print('config defaults OK')
+          "
