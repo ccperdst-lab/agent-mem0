@@ -3,6 +3,8 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 
+[English](README-en.md)
+
 **为 Claude Code 提供跨 Session 记忆能力。**
 
 Claude Code 每次对话都是全新的 — 它不记得你的偏好、技术决策、项目上下文。agent-mem0 通过 MCP Server 为 Claude 注入持久记忆，让它在新 Session 中也能延续之前的对话上下文。
