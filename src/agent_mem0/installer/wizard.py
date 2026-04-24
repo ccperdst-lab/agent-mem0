@@ -31,20 +31,38 @@ console = Console()
 # Public entry point
 # ------------------------------------------------------------------
 
-def run_install_wizard() -> None:
-    """Run the interactive install wizard."""
+def run_install_wizard(
+    *,
+    use_default: bool = False,
+    llm_model: str | None = None,
+    embedder_model: str | None = None,
+    qdrant_mode: str | None = None,
+) -> None:
+    """Run the interactive install wizard.
+
+    Args:
+        use_default: Skip all interactive prompts, use default config values.
+        llm_model: Override the default LLM model name.
+        embedder_model: Override the default embedder model name.
+        qdrant_mode: Override the default Qdrant storage mode ("docker" or "local").
+    """
     console.print(Panel.fit(
         "[bold cyan]🧠 Agent Mem0 安装引导[/bold cyan]\n"
         "为 AI Agent 工具配置跨 session 记忆系统",
         border_style="cyan",
     ))
 
-    # ── Phase 1: Interactive configuration ────────────────────────
-    console.print("\n[dim]━━━ 配置选项 ━━━[/dim]\n")
-
-    llm_config = configure_llm_provider()
-    embedder_config = configure_embedder_provider()
-    qdrant_config = configure_qdrant()
+    # ── Phase 1: Configuration ────────────────────────────────────
+    if use_default:
+        console.print("\n[dim]━━━ 使用默认配置 ━━━[/dim]\n")
+        llm_config = _build_default_llm_config(model=llm_model)
+        embedder_config = _build_default_embedder_config(model=embedder_model)
+        qdrant_config = _build_default_qdrant_config(mode=qdrant_mode)
+    else:
+        console.print("\n[dim]━━━ 配置选项 ━━━[/dim]\n")
+        llm_config = configure_llm_provider()
+        embedder_config = configure_embedder_provider()
+        qdrant_config = configure_qdrant()
 
     # ── Phase 2: Execution with progress bar ──────────────────────
     steps = _build_execution_plan(llm_config, embedder_config, qdrant_config)
@@ -65,6 +83,44 @@ def run_install_wizard() -> None:
         "  3. 启动 Claude Code，输入 [cyan]/agent-memory:init[/cyan] 生成项目上下文",
         border_style="green",
     ))
+
+
+# ------------------------------------------------------------------
+# Default config builders (non-interactive mode)
+# ------------------------------------------------------------------
+
+def _build_default_llm_config(*, model: str | None = None) -> dict:
+    """Build LLM config from defaults, with optional model override."""
+    return {
+        "provider": "ollama",
+        "model": model or DEFAULT_CONFIG["llm"]["model"],
+        "base_url": DEFAULT_CONFIG["llm"]["base_url"],
+    }
+
+
+def _build_default_embedder_config(*, model: str | None = None) -> dict:
+    """Build embedder config from defaults, with optional model override."""
+    return {
+        "provider": "ollama",
+        "model": model or DEFAULT_CONFIG["embedder"]["model"],
+        "base_url": DEFAULT_CONFIG["embedder"]["base_url"],
+    }
+
+
+def _build_default_qdrant_config(*, mode: str | None = None) -> dict:
+    """Build Qdrant config from defaults, with optional mode override."""
+    vs = DEFAULT_CONFIG["vector_store"]
+    resolved_mode = mode or vs["mode"]
+    config: dict = {
+        "provider": "qdrant",
+        "mode": resolved_mode,
+        "collection_name": vs["collection_name"],
+        "data_path": vs["data_path"],
+    }
+    if resolved_mode == "docker":
+        config["host"] = vs["host"]
+        config["port"] = vs["port"]
+    return config
 
 
 # ------------------------------------------------------------------

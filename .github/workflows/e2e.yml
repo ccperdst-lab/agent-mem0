@@ -18,50 +18,8 @@ jobs:
       - name: Install agent-mem0
         run: pip install -e .
 
-      - name: Install Ollama
-        run: curl -fsSL https://ollama.ai/install.sh | sh
-
-      - name: Start Ollama
-        run: |
-          ollama serve &
-          sleep 3
-          ollama list
-
-      - name: Pull models
-        run: |
-          ollama pull nomic-embed-text
-          ollama pull qwen2.5:7b
-
-      - name: Start Qdrant container
-        run: |
-          docker pull qdrant/qdrant
-          docker run -d --name agent-mem0-qdrant \
-            -p 6333:6333 \
-            -v /tmp/qdrant_storage:/qdrant/storage \
-            --restart unless-stopped \
-            qdrant/qdrant
-          sleep 3
-          curl -s http://localhost:6333/healthz
-
-      - name: Create config (Ollama + Docker Qdrant)
-        run: |
-          mkdir -p ~/.agent-mem0
-          cat > ~/.agent-mem0/config.yaml << 'YAML'
-          llm:
-            provider: ollama
-            model: qwen2.5:7b
-            base_url: http://localhost:11434
-          embedder:
-            provider: ollama
-            model: nomic-embed-text
-            base_url: http://localhost:11434
-          vector_store:
-            mode: docker
-            host: localhost
-            port: 6333
-            data_path: /tmp/agent-mem0-data
-            embedding_model_dims: 768
-          YAML
+      - name: Install and configure (non-interactive)
+        run: python -m agent_mem0 install --default --llm-model qwen2.5:0.5b
 
       - name: Run E2E test
         run: python tests/e2e_test.py
@@ -91,37 +49,8 @@ jobs:
       - name: Install agent-mem0
         run: pip install -e .
 
-      - name: Install Ollama
-        run: curl -fsSL https://ollama.ai/install.sh | sh
-
-      - name: Start Ollama
-        run: |
-          ollama serve &
-          sleep 3
-          ollama list
-
-      - name: Pull models
-        run: |
-          ollama pull nomic-embed-text
-          ollama pull qwen2.5:7b
-
-      - name: Create config (Ollama + Local Qdrant)
-        run: |
-          mkdir -p ~/.agent-mem0
-          cat > ~/.agent-mem0/config.yaml << 'YAML'
-          llm:
-            provider: ollama
-            model: qwen2.5:7b
-            base_url: http://localhost:11434
-          embedder:
-            provider: ollama
-            model: nomic-embed-text
-            base_url: http://localhost:11434
-          vector_store:
-            mode: local
-            data_path: /tmp/agent-mem0-data
-            embedding_model_dims: 768
-          YAML
+      - name: Install and configure (non-interactive)
+        run: python -m agent_mem0 install --default --llm-model qwen2.5:0.5b --qdrant-mode local
 
       - name: Run E2E test
         run: python tests/e2e_test.py

@@ -25,11 +25,22 @@ def main() -> None:
 
 
 @main.command()
-def install() -> None:
+@click.option("--default", "use_default", is_flag=True, default=False,
+              help="Use all default settings without interactive prompts")
+@click.option("--llm-model", default=None, help="Override LLM model name")
+@click.option("--embedder-model", default=None, help="Override embedder model name")
+@click.option("--qdrant-mode", default=None, type=click.Choice(["docker", "local"]),
+              help="Override Qdrant storage mode")
+def install(use_default: bool, llm_model: str | None, embedder_model: str | None, qdrant_mode: str | None) -> None:
     """Global installation wizard: configure providers, storage, and CLAUDE.md rules."""
     from agent_mem0.installer.wizard import run_install_wizard
 
-    run_install_wizard()
+    run_install_wizard(
+        use_default=use_default,
+        llm_model=llm_model,
+        embedder_model=embedder_model,
+        qdrant_mode=qdrant_mode,
+    )
 
 
 @main.command()
