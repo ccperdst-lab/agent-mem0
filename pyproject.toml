@@ -45,9 +45,9 @@ dev = [
 agent-mem0 = "agent_mem0.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/aishu/agent-mem0"
-Repository = "https://github.com/aishu/agent-mem0"
-Issues = "https://github.com/aishu/agent-mem0/issues"
+Homepage = "https://github.com/ccperdst-lab/agent-mem0"
+Repository = "https://github.com/ccperdst-lab/agent-mem0"
+Issues = "https://github.com/ccperdst-lab/agent-mem0/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_mem0"]
