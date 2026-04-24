@@ -24,17 +24,39 @@ def main() -> None:
 
 @main.command()
 @click.option("--default", "use_default", is_flag=True, default=False,
-              help="Use all default settings without interactive prompts")
+              help="Shortcut for --preset recommended")
+@click.option("--preset", type=click.Choice(["recommended", "light", "cloud"]),
+              default=None, help="Install preset (recommended/light/cloud)")
+@click.option("--api-key", default=None, help="API key for cloud preset (or set OPENAI_API_KEY)")
 @click.option("--llm-model", default=None, help="Override LLM model name")
 @click.option("--embedder-model", default=None, help="Override embedder model name")
-@click.option("--qdrant-mode", default=None, type=click.Choice(["docker", "local"]),
+@click.option("--qdrant-mode", default=None,
+              type=click.Choice(["docker", "local", "external"]),
               help="Override Qdrant storage mode")
-def install(use_default: bool, llm_model: str | None, embedder_model: str | None, qdrant_mode: str | None) -> None:
+def install(
+    use_default: bool,
+    preset: str | None,
+    api_key: str | None,
+    llm_model: str | None,
+    embedder_model: str | None,
+    qdrant_mode: str | None,
+) -> None:
     """Global installation wizard: configure providers, storage, and CLAUDE.md rules."""
+    import os
+
     from agent_mem0.installer.wizard import run_install_wizard
 
+    # --default is shortcut for --preset recommended
+    if use_default and not preset:
+        preset = "recommended"
+
+    # Cloud preset: fallback to OPENAI_API_KEY env var
+    if preset == "cloud" and not api_key:
+        api_key = os.environ.get("OPENAI_API_KEY")
+
     run_install_wizard(
-        use_default=use_default,
+        preset=preset,
+        api_key=api_key,
         llm_model=llm_model,
         embedder_model=embedder_model,
         qdrant_mode=qdrant_mode,

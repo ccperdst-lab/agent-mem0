@@ -64,11 +64,25 @@ def start_qdrant_container(
 def configure_qdrant() -> dict:
     """Interactive Qdrant configuration."""
     console.print("\n[bold]选择 Qdrant 存储模式[/bold]")
-    console.print("  1. Docker [green](默认，推荐)[/green]")
-    console.print("  2. Local（纯 Python，无需 Docker）")
+    console.print("  1. 自动选择 [green](默认)[/green]")
+    console.print("  2. Docker（手动指定端口/路径）")
+    console.print("  3. Local（纯 Python，无需 Docker）")
+    console.print("  4. 连接已有 Qdrant（填写地址）")
 
     choice = Prompt.ask("选择", default="1")
-    mode = "local" if choice == "2" else "docker"
+
+    default_data_path = "~/.local/share/agent-mem0"
+
+    if choice == "4":
+        mode = "external"
+    elif choice == "3":
+        mode = "local"
+    elif choice == "2":
+        mode = "docker"
+    else:
+        # Auto: detect Docker availability
+        from agent_mem0.installer import docker  # Delayed: avoid circular at module level
+        mode = "docker" if docker.is_ready() or docker.is_installed() else "local"
 
     config: dict = {
         "provider": "qdrant",
@@ -76,13 +90,14 @@ def configure_qdrant() -> dict:
         "collection_name": "agent_mem0",
     }
 
-    default_data_path = "~/.local/share/agent-mem0"
-
-    if mode == "docker":
+    if mode == "external":
+        config["host"] = Prompt.ask("Qdrant 地址", default="localhost")
+        config["port"] = int(Prompt.ask("Qdrant 端口", default="6333"))
+    elif mode == "docker":
         config["host"] = Prompt.ask("Qdrant 地址", default="localhost")
         config["port"] = int(Prompt.ask("Qdrant 端口", default="6333"))
         config["data_path"] = Prompt.ask("数据持久化路径", default=default_data_path)
-    else:
+    else:  # local
         config["data_path"] = Prompt.ask("数据持久化路径", default=default_data_path)
 
     return config

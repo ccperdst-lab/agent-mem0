@@ -68,11 +68,12 @@
 # mode: 存储模式
 #   - docker: 通过 Docker 容器运行 Qdrant（推荐，数据通过 volume 映射持久化）
 #   - local: 纯 Python 模式，无需 Docker，直接读写本地文件
+#   - external: 连接已有的 Qdrant 服务（不管理容器生命周期）
 #
-# host: Qdrant 服务地址（仅 docker 模式）
+# host: Qdrant 服务地址（docker / external 模式）
 #   默认: localhost
 #
-# port: Qdrant 服务端口（仅 docker 模式）
+# port: Qdrant 服务端口（docker / external 模式）
 #   默认: 6333
 #
 # data_path: 数据持久化根目录

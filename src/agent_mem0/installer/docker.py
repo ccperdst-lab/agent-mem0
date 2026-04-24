@@ -11,6 +11,7 @@ import platform
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 from agent_mem0.installer.output import console
 from agent_mem0.installer.progress import InstallProgress
@@ -25,7 +26,6 @@ def is_installed() -> bool:
     if shutil.which("docker"):
         return True
     if platform.system().lower() == "darwin":
-        from pathlib import Path
         return Path("/Applications/Docker.app").exists()
     return False
 

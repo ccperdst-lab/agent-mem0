@@ -1,11 +1,15 @@
 name: E2E Test
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   e2e-docker:
-    name: E2E (Qdrant Docker)
+    name: E2E (preset=recommended, Qdrant Docker)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,8 +22,8 @@ jobs:
       - name: Install agent-mem0
         run: pip install -e .
 
-      - name: Install and configure (non-interactive)
-        run: python -m agent_mem0 install --default --llm-model qwen2.5:0.5b
+      - name: Install and configure (recommended preset, override to small model)
+        run: agent-mem0 install --preset recommended --llm-model qwen2.5:0.5b
 
       - name: Run E2E test
         run: python tests/e2e_test.py
@@ -36,7 +40,7 @@ jobs:
         run: agent-mem0 uninstall --force
 
   e2e-local:
-    name: E2E (Qdrant Local)
+    name: E2E (preset=light, Qdrant Local)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,8 +53,8 @@ jobs:
       - name: Install agent-mem0
         run: pip install -e .
 
-      - name: Install and configure (non-interactive)
-        run: python -m agent_mem0 install --default --llm-model qwen2.5:0.5b --qdrant-mode local
+      - name: Install and configure (light preset)
+        run: agent-mem0 install --preset light
 
       - name: Run E2E test
         run: python tests/e2e_test.py

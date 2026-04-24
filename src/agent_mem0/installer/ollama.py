@@ -11,6 +11,7 @@ import platform
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 from agent_mem0.installer.output import console
 from agent_mem0.installer.progress import InstallProgress
@@ -50,7 +51,6 @@ def resolve_path() -> str | None:
         return None
 
     # Common winget / manual install locations on Windows
-    from pathlib import Path
     candidates = [
         Path(os.environ.get("LOCALAPPDATA", ""))
         / "Programs" / "Ollama" / "ollama.exe",

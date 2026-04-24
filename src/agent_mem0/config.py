@@ -31,7 +31,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "vector_store": {
         "provider": "qdrant",
-        "mode": "docker",  # docker | local
+        "mode": "docker",  # docker | local | external
         "host": "localhost",
         "port": 6333,
         "data_path": "~/.local/share/agent-mem0",
@@ -276,10 +276,10 @@ def build_mem0_config(config: dict[str, Any], project: str) -> dict[str, Any]:
             "embedding_model_dims": vs_cfg.get("embedding_model_dims", 768),
         },
     }
-    if vs_cfg["mode"] == "docker":
+    if vs_cfg["mode"] in ("docker", "external"):
         vs_section["config"]["host"] = vs_cfg["host"]
         vs_section["config"]["port"] = vs_cfg["port"]
-    else:
+    else:  # local
         data_path = Path(vs_cfg.get("data_path", "~/.local/share/agent-mem0")).expanduser()
         vs_section["config"]["path"] = str(data_path / "qdrant_storage")
     mem0_config["vector_store"] = vs_section
