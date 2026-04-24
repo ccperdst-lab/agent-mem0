@@ -7,6 +7,7 @@ Two-phase design:
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -193,6 +194,7 @@ def _execute_plan(
 ) -> None:
     """Execute every step in the plan while updating the progress bar."""
     step_keys = {s.key for s in steps}
+    ollama_bin = "ollama"  # May be updated to absolute path after install
 
     # ── Install Ollama ────────────────────────────────────────────
     if "install_ollama" in step_keys:
@@ -207,10 +209,15 @@ def _execute_plan(
             tracker.print("[red]  ✗ Ollama 安装失败，请手动安装: https://ollama.ai[/red]")
             _print_error_detail(tracker, output)
 
+        # On Windows, winget installs may not be on current PATH — find the binary
+        resolved = _resolve_ollama_path()
+        if resolved:
+            ollama_bin = resolved
+
     # ── Start Ollama ──────────────────────────────────────────────
     if "start_ollama" in step_keys:
         tracker.begin_step("start_ollama")
-        _ensure_ollama_ready(tracker)
+        _ensure_ollama_ready(tracker, ollama_bin=ollama_bin)
         tracker.complete_step("start_ollama")
 
     # ── Pull models ───────────────────────────────────────────────
@@ -220,7 +227,7 @@ def _execute_plan(
     for model in models_to_pull:
         key = f"pull_{model}"
         success, output = tracker.run_subprocess(
-            ["ollama", "pull", model], key, parse_pct=True,
+            [ollama_bin, "pull", model], key, parse_pct=True,
         )
         if success:
             tracker.print(f"[green]  ✓ 模型 {model} 就绪[/green]")
@@ -335,14 +342,42 @@ def _print_error_detail(tracker: InstallProgress, output: str) -> None:
             tracker.print(f"[dim]    {line[:200]}[/dim]")
 
 
-def _ensure_ollama_ready(tracker: InstallProgress) -> None:
+def _resolve_ollama_path() -> str | None:
+    """Find Ollama binary path, even if not on current PATH.
+
+    On Windows, winget installs to a user-specific directory that may
+    not be on PATH until the terminal is restarted. This function
+    checks common install locations.
+    """
+    # Already on PATH
+    found = shutil.which("ollama")
+    if found:
+        return found
+
+    if platform.system().lower() != "windows":
+        return None
+
+    # Common winget / manual install locations on Windows
+    from pathlib import Path
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+        Path(os.environ.get("PROGRAMFILES", "")) / "Ollama" / "ollama.exe",
+        Path(os.environ.get("USERPROFILE", "")) / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return None
+
+
+def _ensure_ollama_ready(tracker: InstallProgress, *, ollama_bin: str = "ollama") -> None:
     """Ensure Ollama service is running with retries."""
     import time
 
     # First check if already running
     try:
         result = subprocess.run(
-            ["ollama", "list"], capture_output=True, text=True, timeout=5,
+            [ollama_bin, "list"], capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0:
             tracker.print("[green]  ✓ Ollama 服务已就绪[/green]")
@@ -354,7 +389,7 @@ def _ensure_ollama_ready(tracker: InstallProgress) -> None:
     tracker.update_description("启动 Ollama 服务...")
     try:
         subprocess.Popen(
-            ["ollama", "serve"],
+            [ollama_bin, "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -368,7 +403,7 @@ def _ensure_ollama_ready(tracker: InstallProgress) -> None:
         tracker.update_description(f"等待 Ollama 就绪... ({i + 1}s)")
         try:
             result = subprocess.run(
-                ["ollama", "list"], capture_output=True, text=True, timeout=3,
+                [ollama_bin, "list"], capture_output=True, text=True, timeout=3,
             )
             if result.returncode == 0:
                 tracker.print("[green]  ✓ Ollama 服务已就绪[/green]")
