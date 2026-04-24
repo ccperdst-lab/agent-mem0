@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -118,8 +119,8 @@ def write_project_mcp_json(project_dir: Path, project_name: str) -> None:
     mcp_path = project_dir / ".mcp.json"
 
     mcp_entry = {
-        "command": "agent-mem0",
-        "args": ["serve", "--project", project_name],
+        "command": sys.executable,
+        "args": ["-m", "agent_mem0", "serve", "--project", project_name],
     }
 
     if mcp_path.exists():
