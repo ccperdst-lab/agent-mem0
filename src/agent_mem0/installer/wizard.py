@@ -199,7 +199,9 @@ def _execute_plan(
         success, output = tracker.run_subprocess(
             _ollama_install_cmd(), "install_ollama",
         )
-        if success:
+        # winget returns non-zero when package is already installed
+        already_installed = "已安装" in output or "already installed" in output.lower()
+        if success or already_installed:
             tracker.print("[green]  ✓ Ollama 安装成功[/green]")
         else:
             tracker.print("[red]  ✗ Ollama 安装失败，请手动安装: https://ollama.ai[/red]")
@@ -232,7 +234,8 @@ def _execute_plan(
         success, output = tracker.run_subprocess(
             _docker_install_cmd(), "install_docker",
         )
-        if success:
+        already_installed = "已安装" in output or "already installed" in output.lower()
+        if success or already_installed:
             tracker.print("[green]  ✓ Docker 已安装[/green]")
         else:
             tracker.print("[red]  ✗ Docker 安装失败，请手动安装: https://docker.com[/red]")
@@ -349,11 +352,15 @@ def _ensure_ollama_ready(tracker: InstallProgress) -> None:
 
     # Start the service
     tracker.update_description("启动 Ollama 服务...")
-    subprocess.Popen(
-        ["ollama", "serve"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        tracker.print("[yellow]  ⚠ Ollama 命令未找到，可能需要重启终端刷新 PATH[/yellow]")
+        return
 
     # Wait with retries (up to 15 seconds)
     for i in range(15):
