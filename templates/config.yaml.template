@@ -1,0 +1,151 @@
+# ═══════════════════════════════════════════════════════════════════
+# agent-mem0 配置文件
+# ═══════════════════════════════════════════════════════════════════
+#
+# 本文件由 `agent-mem0 install` 自动生成。
+# 所有配置项均有默认值（由代码内置的 shadow config 提供），
+# 只需取消注释并修改你想覆盖的配置项。
+#
+# 配置加载优先级：用户配置（本文件） > shadow config（代码默认值）
+#
+
+# ── LLM 配置 ─────────────────────────────────────────────────────
+# 用于 mem0 的记忆提取、冲突检测、语义理解。
+# mem0 通过 LLM 判断新记忆是否与已有记忆冲突，并决定是新增还是更新。
+#
+# provider: LLM 提供商
+#   可选值: ollama / openai / litellm / anthropic
+#   - ollama: 本地部署，无需 API 密钥，需要先安装 Ollama
+#   - openai: OpenAI 官方 API 或兼容接口
+#   - litellm: 通过 LiteLLM 代理访问多种模型（映射为 openai 协议）
+#   - anthropic: Anthropic Claude API
+#
+# model: 模型名称
+#   ollama 示例: qwen2.5:7b, llama3:8b
+#   openai 示例: gpt-4o, gpt-4o-mini
+#   litellm 示例: azure_openai/gpt-4o
+#
+# base_url: API 地址
+#   ollama 默认: http://localhost:11434
+#   openai 默认: https://api.openai.com/v1
+#   litellm: 你的 LiteLLM 代理地址
+#
+# api_key: API 密钥
+#   ollama 不需要；openai/litellm/anthropic 必填
+#
+# llm:
+#   provider: ollama
+#   model: qwen2.5:7b
+#   base_url: http://localhost:11434
+#   api_key: ""
+
+# ── Embedder 配置 ────────────────────────────────────────────────
+# 用于将文本转为向量，供 Qdrant 进行语义相似度搜索。
+# 记忆的存储和检索质量直接取决于 embedding 模型的效果。
+#
+# provider: Embedding 提供商
+#   可选值与 LLM 相同: ollama / openai / litellm
+#   注意: mem0 不原生支持 litellm 作为 embedder provider，
+#   agent-mem0 会自动将 litellm 映射为 openai + openai_base_url
+#
+# model: Embedding 模型名称
+#   ollama 示例: nomic-embed-text (768维)
+#   openai 示例: text-embedding-3-large (3072维), text-embedding-3-small (1536维)
+#
+# base_url: API 地址（同 LLM）
+#
+# api_key: API 密钥（同 LLM）
+#
+# embedder:
+#   provider: ollama
+#   model: nomic-embed-text
+#   base_url: http://localhost:11434
+#   api_key: ""
+
+# ── Vector Store 配置 ────────────────────────────────────────────
+# Qdrant 向量数据库，用于存储和检索记忆向量。
+#
+# mode: 存储模式
+#   - docker: 通过 Docker 容器运行 Qdrant（推荐，数据通过 volume 映射持久化）
+#   - local: 纯 Python 模式，无需 Docker，直接读写本地文件
+#
+# host: Qdrant 服务地址（仅 docker 模式）
+#   默认: localhost
+#
+# port: Qdrant 服务端口（仅 docker 模式）
+#   默认: 6333
+#
+# data_path: 数据持久化根目录
+#   - docker 模式: 作为 volume 映射源，映射到容器内 /qdrant/storage
+#   - local 模式: Qdrant 直接读写的存储目录
+#   实际存储路径为 {data_path}/qdrant_storage/
+#   默认: ~/.local/share/agent-mem0
+#
+# collection_name: Qdrant collection 名称
+#   默认: agent_mem0（通常无需修改）
+#
+# embedding_model_dims: Embedding 向量维度
+#   install 向导会自动检测，通常无需手动设置
+#   常见值: nomic-embed-text=768, text-embedding-3-large=3072, text-embedding-3-small=1536
+#
+# vector_store:
+#   mode: docker
+#   host: localhost
+#   port: 6333
+#   data_path: ~/.local/share/agent-mem0
+#   collection_name: agent_mem0
+#   embedding_model_dims: 768
+
+# ── 记忆管理配置 ─────────────────────────────────────────────────
+# 控制记忆的生命周期和垃圾回收行为。
+#
+# default_ttl_days: 记忆默认保留天数
+#   超过此天数的记忆在搜索时会被标记为过期，并由 GC 机制清理
+#   默认: 30
+#
+# gc_threshold: 垃圾回收触发阈值
+#   当过期记忆 ID 累积到此数量时，触发一次批量删除
+#   默认: 20
+#
+# search_top_k: 每路搜索（项目/全局）向 Qdrant 请求的候选数量
+#   两路搜索各自取 top_k 条候选，合并后再按 score 排序截断
+#   增大此值可提高召回率但略增查询耗时
+#   默认: 20
+#
+# search_threshold: 搜索相关性阈值（0~1）
+#   低于此 score 的结果在 Qdrant 侧直接过滤，不会返回
+#   设为 0 等价于不过滤（旧行为）
+#   默认: 0.3
+#
+# search_max_results: 最终返回给调用方的最大记忆条数
+#   合并排序后取前 N 条，项目和全局记忆按 score 公平竞争
+#   默认: 10
+#
+# memory:
+#   default_ttl_days: 30
+#   gc_threshold: 20
+#   search_top_k: 20
+#   search_threshold: 0.3
+#   search_max_results: 10
+
+# ── 日志配置 ─────────────────────────────────────────────────────
+# MCP Server 的运行日志，用于调试和问题排查。
+#
+# level: 日志级别
+#   可选值: debug / info / warning / error
+#   默认: info
+#
+# max_size_mb: 单个日志文件最大大小（MB）
+#   默认: 10
+#
+# max_files: 保留的日志文件数量（轮转）
+#   默认: 3
+#
+# path: 日志文件路径
+#   默认: ~/.agent-mem0/logs/agent-mem0.log
+#
+# log:
+#   level: info
+#   max_size_mb: 10
+#   max_files: 3
+#   path: ~/.agent-mem0/logs/agent-mem0.log

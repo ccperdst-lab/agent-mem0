@@ -34,13 +34,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode": "docker",  # docker | local
         "host": "localhost",
         "port": 6333,
-        "path": str(AGENT_MEM0_HOME / "qdrant_data"),
+        "data_path": "~/.local/share/agent-mem0",
         "collection_name": "agent_mem0",
         "embedding_model_dims": 768,  # nomic-embed-text=768, openai=1536
     },
     "memory": {
         "default_ttl_days": 30,
         "gc_threshold": 20,
+        "search_top_k": 20,
+        "search_threshold": 0.3,
+        "search_max_results": 10,
     },
     "log": {
         "level": "info",
@@ -139,10 +142,82 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any]) -> None:
-    """Save config to file."""
+    """Save config to file (legacy yaml.dump, used for programmatic updates)."""
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def _find_template_path() -> Path:
+    """Locate config.yaml.template relative to the package."""
+    # When installed as a package, templates/ is alongside src/
+    pkg_dir = Path(__file__).resolve().parent  # agent_mem0/
+    # Try: package_root/templates/
+    for candidate in [
+        pkg_dir.parent.parent / "templates",  # src/../templates (dev)
+    ]:
+        template = candidate / "config.yaml.template"
+        if template.exists():
+            return template
+    raise FileNotFoundError("config.yaml.template not found")
+
+
+def save_config_from_template(overrides: dict[str, dict[str, Any]]) -> None:
+    """Generate config.yaml from template by uncommenting override lines.
+
+    Args:
+        overrides: Nested dict of {section: {key: value}} to uncomment and set.
+                   Example: {"llm": {"provider": "litellm", "base_url": "https://..."}}
+    """
+    template_path = _find_template_path()
+    template = template_path.read_text(encoding="utf-8")
+
+    lines = template.splitlines()
+    result: list[str] = []
+    current_section: str | None = None
+
+    for line in lines:
+        stripped = line.lstrip("# ").strip()
+
+        # Detect section headers like "# llm:" or "# vector_store:"
+        if stripped.rstrip(":") in ("llm", "embedder", "vector_store", "memory", "log"):
+            candidate_section = stripped.rstrip(":")
+            if candidate_section in overrides:
+                current_section = candidate_section
+                result.append(f"{candidate_section}:")
+                continue
+            else:
+                current_section = None
+                result.append(line)
+                continue
+
+        # Inside an active section, try to match "key: value" lines
+        if current_section and line.startswith("#   ") and ":" in stripped:
+            parts = stripped.split(":", 1)
+            if len(parts) == 2:
+                key = parts[0].strip()
+                if key in overrides.get(current_section, {}):
+                    value = overrides[current_section][key]
+                    # Format the value
+                    if isinstance(value, str):
+                        # Quote strings that contain special chars or are empty
+                        if not value or any(c in value for c in ":#{}[]&*?|>!%@`"):
+                            value_str = f'"{value}"'
+                        else:
+                            value_str = value
+                    else:
+                        value_str = str(value)
+                    result.append(f"  {key}: {value_str}")
+                    continue
+
+        # Check if we've left the current section (non-comment, non-empty, not indented)
+        if current_section and line and not line.startswith("#") and not line.startswith(" "):
+            current_section = None
+
+        result.append(line)
+
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text("\n".join(result) + "\n", encoding="utf-8")
 
 
 def build_mem0_config(config: dict[str, Any], project: str) -> dict[str, Any]:
@@ -205,7 +280,8 @@ def build_mem0_config(config: dict[str, Any], project: str) -> dict[str, Any]:
         vs_section["config"]["host"] = vs_cfg["host"]
         vs_section["config"]["port"] = vs_cfg["port"]
     else:
-        vs_section["config"]["path"] = vs_cfg["path"]
+        data_path = Path(vs_cfg.get("data_path", "~/.local/share/agent-mem0")).expanduser()
+        vs_section["config"]["path"] = str(data_path / "qdrant_storage")
     mem0_config["vector_store"] = vs_section
 
     return mem0_config

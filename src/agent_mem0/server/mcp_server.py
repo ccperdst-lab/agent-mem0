@@ -24,6 +24,9 @@ from agent_mem0.logger import (
 _memory = None
 _locked_project: str = ""
 _default_ttl_days: int = 30
+_search_top_k: int = 20
+_search_threshold: float = 0.3
+_search_max_results: int = 10
 _mcp = FastMCP("agent-memory")
 _write_worker: _WriteWorker | None = None
 _gc_buffer: _GCBuffer | None = None
@@ -132,13 +135,14 @@ def _filter_by_time(memories: list[dict], days: int) -> tuple[list[dict], list[s
 
 
 @_mcp.tool()
-def memory_search(query: str, project: str = "", days: int = 0) -> str:
+def memory_search(query: str, project: str = "", days: int = 0, top_k: int = 0) -> str:
     """搜索记忆。默认搜索当前项目和全局记忆。
 
     Args:
         query: 搜索关键词或语义描述
         project: 项目名（默认为当前项目，也可指定 "global" 只搜全局）
         days: 时间过滤，只返回最近 N 天的记忆（默认使用配置的 TTL）
+        top_k: 最终返回的最大条数（默认 0 表示使用配置值）
     """
     if not project:
         project = _locked_project
@@ -150,11 +154,20 @@ def memory_search(query: str, project: str = "", days: int = 0) -> str:
     if days <= 0:
         days = _default_ttl_days
 
+    max_results = top_k if top_k > 0 else _search_max_results
+
     start = time.time()
     try:
         results = []
+
+        search_kwargs = {"top_k": _search_top_k}
+        if _search_threshold > 0:
+            search_kwargs["threshold"] = _search_threshold
+
         # Search within the specified project
-        project_results = _memory.search(query, filters={"user_id": project}, top_k=10)
+        project_results = _memory.search(
+            query, filters={"user_id": project}, **search_kwargs,
+        )
         if isinstance(project_results, dict) and "results" in project_results:
             results.extend(project_results["results"])
         elif isinstance(project_results, list):
@@ -162,13 +175,19 @@ def memory_search(query: str, project: str = "", days: int = 0) -> str:
 
         # Also search global if project is not global
         if project != "global":
-            global_results = _memory.search(query, filters={"user_id": "global"}, top_k=5)
+            global_results = _memory.search(
+                query, filters={"user_id": "global"}, **search_kwargs,
+            )
             if isinstance(global_results, dict) and "results" in global_results:
                 results.extend(global_results["results"])
             elif isinstance(global_results, list):
                 results.extend(global_results)
 
         results, expired_ids = _filter_by_time(results, days)
+
+        # Unified score-based ranking: sort by score descending, then truncate
+        results.sort(key=lambda r: r.get("score", 0.0), reverse=True)
+        results = results[:max_results]
 
         # Feed expired IDs to GC buffer
         if expired_ids and _gc_buffer is not None:
@@ -183,8 +202,16 @@ def memory_search(query: str, project: str = "", days: int = 0) -> str:
         log_memory_op("SEARCH", project, f"query=\"{query}\" results={len(results)} time={elapsed:.2f}s")
         log_debug(f"Search details: query=\"{query}\" project={project} days={days} raw={json.dumps(results, ensure_ascii=False, default=str)}")
 
-        # Return compact format: only fields Claude needs
-        compact = [{"id": r["id"], "memory": r.get("memory", ""), "project": r.get("user_id", "")} for r in results]
+        # Return compact format with score
+        compact = [
+            {
+                "id": r["id"],
+                "memory": r.get("memory", ""),
+                "project": r.get("user_id", ""),
+                "score": round(r.get("score", 0.0), 4),
+            }
+            for r in results
+        ]
         return json.dumps({"memories": compact, "count": len(compact)}, ensure_ascii=False)
     except Exception as e:
         log_error(f"Search failed: {e}")
@@ -329,13 +356,18 @@ def memory_delete(memory_id: str) -> str:
 def run_server(project: str) -> None:
     """Initialize and run the MCP Server."""
     global _memory, _locked_project, _default_ttl_days, _write_worker, _gc_buffer
+    global _search_top_k, _search_threshold, _search_max_results
 
     config = load_config()
     setup_logger(config)
 
     _locked_project = project
-    _default_ttl_days = config.get("memory", {}).get("default_ttl_days", 30)
-    gc_threshold = config.get("memory", {}).get("gc_threshold", 20)
+    mem_cfg = config.get("memory", {})
+    _default_ttl_days = mem_cfg.get("default_ttl_days", 30)
+    _search_top_k = mem_cfg.get("search_top_k", 20)
+    _search_threshold = mem_cfg.get("search_threshold", 0.3)
+    _search_max_results = mem_cfg.get("search_max_results", 10)
+    gc_threshold = mem_cfg.get("gc_threshold", 20)
 
     log_debug(f"Starting MCP Server: project={project}")
 
