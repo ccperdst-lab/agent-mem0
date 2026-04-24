@@ -21,10 +21,11 @@ def _check_qdrant(config: dict) -> tuple[str, str]:
     mode = vs.get("mode", "docker")
 
     if mode == "local":
-        path = Path(vs.get("path", "")).expanduser()
-        if path.exists():
-            return "✅", f"Local ({path})"
-        return "⚠️", f"Local (目录不存在: {path})"
+        data_path = Path(vs.get("data_path", "~/.local/share/agent-mem0")).expanduser()
+        storage_path = data_path / "qdrant_storage"
+        if storage_path.exists():
+            return "✅", f"Local ({storage_path})"
+        return "⚠️", f"Local (目录不存在: {storage_path})"
 
     host = vs.get("host", "localhost")
     port = vs.get("port", 6333)
@@ -98,6 +99,15 @@ def show_status() -> None:
     # Qdrant
     qdrant_icon, qdrant_msg = _check_qdrant(config)
     table.add_row("Qdrant", f"{qdrant_icon} {qdrant_msg}")
+
+    # Data path
+    vs = config.get("vector_store", {})
+    data_path = Path(vs.get("data_path", "~/.local/share/agent-mem0")).expanduser()
+    storage_path = data_path / "qdrant_storage"
+    if storage_path.exists():
+        table.add_row("数据目录", f"✅ {storage_path}")
+    else:
+        table.add_row("数据目录", f"⚠️ {storage_path} (不存在)")
 
     # LLM
     llm = config.get("llm", {})

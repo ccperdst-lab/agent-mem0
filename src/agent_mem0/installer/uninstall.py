@@ -1,4 +1,8 @@
-"""Uninstall: remove all agent-mem0 artifacts."""
+"""Uninstall: remove agent-mem0 config and artifacts.
+
+Default: only removes regenerable config/artifacts, preserves user memory data.
+--purge: also removes user memory data and Docker container.
+"""
 
 from __future__ import annotations
 
@@ -17,12 +21,20 @@ from agent_mem0.installer.registry import load_registry
 console = Console()
 
 
-def run_uninstall(*, all_flag: bool = False, force: bool = False) -> None:
+def _get_data_path(config: dict | None) -> Path:
+    """Get the data_path from config, with fallback to default."""
+    if config:
+        vs = config.get("vector_store", {})
+        return Path(vs.get("data_path", "~/.local/share/agent-mem0")).expanduser()
+    return Path("~/.local/share/agent-mem0").expanduser()
+
+
+def run_uninstall(*, purge: bool = False, force: bool = False) -> None:
     """Main uninstall entry point."""
-    # Gather info for confirmation
     config = _load_config_safe()
     registry = load_registry()
     projects = registry.get("projects", {})
+    data_path = _get_data_path(config)
 
     # Show what will be cleaned
     console.print("\n[bold red]即将清理以下 agent-mem0 产物:[/bold red]\n")
@@ -40,16 +52,17 @@ def run_uninstall(*, all_flag: bool = False, force: bool = False) -> None:
     else:
         console.print("[dim]  无已注册项目[/dim]")
 
-    console.print(f"\n[bold]全局文件:[/bold]")
-    console.print(f"  • ~/.claude/CLAUDE.md (agent-mem0 规则区块)")
+    console.print("\n[bold]全局文件:[/bold]")
+    console.print("  • ~/.claude/CLAUDE.md (agent-mem0 规则区块)")
     console.print(f"  • {AGENT_MEM0_HOME}/ (配置、日志、注册表)")
 
-    console.print(f"\n[bold]Qdrant:[/bold]")
-    console.print(f"  • agent_mem0 collection")
+    console.print("\n[bold]Qdrant:[/bold]")
+    console.print("  • agent_mem0 collection")
 
-    if all_flag:
-        console.print(f"\n[bold]Docker (--all):[/bold]")
-        console.print(f"  • agent-mem0-qdrant 容器")
+    if purge:
+        console.print("\n[bold red]--purge 额外清理:[/bold red]")
+        console.print(f"  • {data_path}/ (用户记忆数据)")
+        console.print("  • agent-mem0-qdrant Docker 容器")
 
     console.print()
 
@@ -59,16 +72,32 @@ def run_uninstall(*, all_flag: bool = False, force: bool = False) -> None:
             console.print("[dim]已取消[/dim]")
             return
 
+    # Purge: extra confirmation for destructive data deletion
+    if purge and not force:
+        console.print()
+        if not Confirm.ask(
+            "[bold red]⚠ 这将永久删除所有记忆数据，确认?[/bold red]",
+            default=False,
+        ):
+            console.print("[dim]已取消 purge，仅执行基础卸载[/dim]")
+            purge = False
+
     # Execute cleanup
     _clean_project_artifacts(projects)
     _clean_claude_md()
     _clean_qdrant_collection(config)
-    if all_flag:
-        _clean_docker_container()
     _clean_home_dir()
+
+    if purge:
+        _clean_data_dir(data_path)
+        _clean_docker_container()
 
     console.print("\n[bold green]✓ agent-mem0 产物已清理完毕[/bold green]")
     console.print("[dim]如需卸载 Python 包: pip uninstall agent-mem0[/dim]")
+
+    if not purge:
+        console.print(f"\n[cyan]用户记忆数据保留在: {data_path}/[/cyan]")
+        console.print("[dim]如需彻底清除，重新运行: agent-mem0 uninstall --purge[/dim]")
 
 
 def _load_config_safe() -> dict | None:
@@ -99,7 +128,6 @@ def _clean_project_artifacts(projects: dict) -> None:
                 if "agent-memory" in servers:
                     del servers["agent-memory"]
                     if not servers:
-                        # mcpServers is empty, delete the file
                         mcp_path.unlink()
                         console.print(f"  ✓ 删除 {mcp_path}")
                     else:
@@ -136,7 +164,6 @@ def _clean_claude_md() -> None:
         start = content.index(MARKER_START)
         end = content.index(MARKER_END) + len(MARKER_END)
 
-        # Remove the block and any surrounding blank lines
         before = content[:start].rstrip("\n")
         after = content[end:].lstrip("\n")
 
@@ -149,7 +176,6 @@ def _clean_claude_md() -> None:
             claude_md_path.write_text(new_content + "\n", encoding="utf-8")
             console.print(f"  ✓ 移除 {claude_md_path} 中 agent-mem0 规则")
         else:
-            # CLAUDE.md is now empty, delete it
             claude_md_path.unlink()
             console.print(f"  ✓ 删除 {claude_md_path} (已无内容)")
     except (OSError, ValueError) as e:
@@ -180,6 +206,31 @@ def _clean_qdrant_collection(config: dict | None) -> None:
     console.print(f"  [yellow]⚠ 无法连接 Qdrant ({host}:{port})，请手动删除 collection: {collection}[/yellow]")
 
 
+def _clean_home_dir() -> None:
+    """Remove ~/.agent-mem0/ config directory (preserves data directory)."""
+    if not AGENT_MEM0_HOME.exists():
+        return
+
+    try:
+        shutil.rmtree(AGENT_MEM0_HOME)
+        console.print(f"  ✓ 删除 {AGENT_MEM0_HOME}/")
+    except OSError as e:
+        console.print(f"  [yellow]⚠ 删除 {AGENT_MEM0_HOME} 失败: {e}[/yellow]")
+
+
+def _clean_data_dir(data_path: Path) -> None:
+    """Remove user memory data directory. Only called with --purge."""
+    if not data_path.exists():
+        console.print(f"  [dim]数据目录不存在: {data_path}，跳过[/dim]")
+        return
+
+    try:
+        shutil.rmtree(data_path)
+        console.print(f"  ✓ 删除用户数据目录: {data_path}/")
+    except OSError as e:
+        console.print(f"  [yellow]⚠ 删除 {data_path} 失败: {e}[/yellow]")
+
+
 def _clean_docker_container() -> None:
     """Remove the agent-mem0-qdrant Docker container."""
     if not shutil.which("docker"):
@@ -194,22 +245,9 @@ def _clean_docker_container() -> None:
         if result.returncode == 0:
             console.print("  ✓ 删除 Docker 容器: agent-mem0-qdrant")
         else:
-            # Container might not exist
             if "No such container" in result.stderr:
                 console.print("  [dim]容器 agent-mem0-qdrant 不存在，跳过[/dim]")
             else:
                 console.print(f"  [yellow]⚠ 删除容器失败: {result.stderr.strip()}[/yellow]")
     except (subprocess.TimeoutExpired, OSError) as e:
         console.print(f"  [yellow]⚠ 删除容器失败: {e}[/yellow]")
-
-
-def _clean_home_dir() -> None:
-    """Remove ~/.agent-mem0/ directory."""
-    if not AGENT_MEM0_HOME.exists():
-        return
-
-    try:
-        shutil.rmtree(AGENT_MEM0_HOME)
-        console.print(f"  ✓ 删除 {AGENT_MEM0_HOME}/")
-    except OSError as e:
-        console.print(f"  [yellow]⚠ 删除 {AGENT_MEM0_HOME} 失败: {e}[/yellow]")

@@ -14,7 +14,7 @@ import subprocess
 from rich.console import Console
 from rich.panel import Panel
 
-from agent_mem0.config import DEFAULT_CONFIG, save_config
+from agent_mem0.config import DEFAULT_CONFIG, save_config, save_config_from_template
 from agent_mem0.installer.claude_code import inject_claude_md_rules
 from agent_mem0.installer.progress import InstallProgress, Step
 from agent_mem0.installer.providers import (
@@ -224,7 +224,8 @@ def _execute_plan(
             # Start container
             tracker.begin_step("start_qdrant")
             if pull_ok:
-                ok = _start_qdrant_container(port)
+                data_path = qdrant_config.get("data_path", "~/.local/share/agent-mem0")
+                ok = _start_qdrant_container(port, data_path=data_path)
                 if ok:
                     tracker.print(f"[green]  ✓ Qdrant 已启动 (port {port})[/green]")
                 else:
@@ -241,7 +242,16 @@ def _execute_plan(
     dims = _detect_embedding_dims(embedder_config)
     config["vector_store"]["embedding_model_dims"] = dims
     tracker.print(f"[dim]  检测到 embedding 维度: {dims}[/dim]")
-    save_config(config)
+    # Build overrides: only user-chosen values that differ from defaults
+    overrides: dict[str, dict] = {}
+    for section in ("llm", "embedder", "vector_store"):
+        section_overrides = {}
+        for key, value in config[section].items():
+            if value != DEFAULT_CONFIG[section].get(key):
+                section_overrides[key] = value
+        if section_overrides:
+            overrides[section] = section_overrides
+    save_config_from_template(overrides)
     tracker.print("[green]  ✓ 配置已保存到 ~/.agent-mem0/config.yaml[/green]")
     tracker.complete_step("save_config")
 
@@ -383,13 +393,18 @@ def _docker_install_cmd() -> list[str]:
     return ["docker", "--version"]
 
 
-def _start_qdrant_container(port: int) -> bool:
-    """Create and start the Qdrant Docker container."""
+def _start_qdrant_container(port: int, data_path: str = "~/.local/share/agent-mem0") -> bool:
+    """Create and start the Qdrant Docker container with volume mapping."""
+    from pathlib import Path
+    storage_path = Path(data_path).expanduser() / "qdrant_storage"
+    storage_path.mkdir(parents=True, exist_ok=True)
+
     result = subprocess.run(
         [
             "docker", "run", "-d",
             "--name", "agent-mem0-qdrant",
             "-p", f"{port}:6333",
+            "-v", f"{storage_path}:/qdrant/storage",
             "--restart", "unless-stopped",
             "qdrant/qdrant",
         ],

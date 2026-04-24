@@ -77,11 +77,16 @@ def detect_qdrant_container() -> bool:
         return False
 
 
-def start_qdrant_docker(port: int = 6333) -> bool:
-    """Start Qdrant Docker container."""
+def start_qdrant_docker(port: int = 6333, data_path: str = "~/.local/share/agent-mem0") -> bool:
+    """Start Qdrant Docker container with volume mapping for data persistence."""
     if detect_qdrant_container():
         console.print(f"[green]✓ Qdrant 容器已在运行 (port {port})[/green]")
         return True
+
+    # Ensure data directory exists
+    from pathlib import Path
+    storage_path = Path(data_path).expanduser() / "qdrant_storage"
+    storage_path.mkdir(parents=True, exist_ok=True)
 
     console.print(f"[cyan]启动 Qdrant Docker 容器 (port {port})...[/cyan]")
     result = subprocess.run(
@@ -89,6 +94,7 @@ def start_qdrant_docker(port: int = 6333) -> bool:
             "docker", "run", "-d",
             "--name", "agent-mem0-qdrant",
             "-p", f"{port}:6333",
+            "-v", f"{storage_path}:/qdrant/storage",
             "--restart", "unless-stopped",
             "qdrant/qdrant",
         ],
@@ -125,13 +131,13 @@ def configure_qdrant() -> dict:
 
     config: dict = {"provider": "qdrant", "mode": mode, "collection_name": "agent_mem0"}
 
+    default_data_path = "~/.local/share/agent-mem0"
+
     if mode == "docker":
         config["host"] = Prompt.ask("Qdrant 地址", default="localhost")
         config["port"] = int(Prompt.ask("Qdrant 端口", default="6333"))
+        config["data_path"] = Prompt.ask("数据持久化路径", default=default_data_path)
     else:
-        from agent_mem0.config import AGENT_MEM0_HOME
-
-        default_path = str(AGENT_MEM0_HOME / "qdrant_data")
-        config["path"] = Prompt.ask("持久化路径", default=default_path)
+        config["data_path"] = Prompt.ask("数据持久化路径", default=default_data_path)
 
     return config

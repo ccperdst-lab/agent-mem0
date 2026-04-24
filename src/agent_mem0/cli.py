@@ -50,13 +50,13 @@ def status() -> None:
 
 
 @main.command()
-@click.option("--all", "all_flag", is_flag=True, default=False, help="Also remove agent-mem0-qdrant Docker container")
+@click.option("--purge", is_flag=True, default=False, help="Also remove user memory data and Docker container")
 @click.option("--force", "-f", is_flag=True, default=False, help="Skip confirmation prompt")
-def uninstall(all_flag: bool, force: bool) -> None:
-    """Remove all agent-mem0 artifacts (config, MCP, skills, Qdrant collection, etc.)."""
+def uninstall(purge: bool, force: bool) -> None:
+    """Remove agent-mem0 config and artifacts. Use --purge to also delete memory data."""
     from agent_mem0.installer.uninstall import run_uninstall
 
-    run_uninstall(all_flag=all_flag, force=force)
+    run_uninstall(purge=purge, force=force)
 
 
 @main.command()
