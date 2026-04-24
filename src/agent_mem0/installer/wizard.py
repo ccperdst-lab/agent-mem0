@@ -3,29 +3,29 @@
 Two-phase design:
   Phase 1 — Interactive configuration (no progress bar, user makes choices)
   Phase 2 — Execution with a non-scrolling progress bar
+
+This module is the orchestration layer. It calls functions from
+ollama.py, docker.py, qdrant.py — never runs subprocess directly.
 """
 
 from __future__ import annotations
 
-import os
-import platform
-import shutil
-import subprocess
-
-from rich.console import Console
 from rich.panel import Panel
 
-from agent_mem0.config import DEFAULT_CONFIG, save_config, save_config_from_template
+from agent_mem0.config import DEFAULT_CONFIG, save_config_from_template
+from agent_mem0.installer import docker, ollama
 from agent_mem0.installer.claude_code import inject_claude_md_rules
+from agent_mem0.installer.output import console
 from agent_mem0.installer.progress import InstallProgress, Step
 from agent_mem0.installer.providers import (
     configure_embedder_provider,
     configure_llm_provider,
-    detect_ollama,
 )
-from agent_mem0.installer.qdrant import configure_qdrant
-
-console = Console()
+from agent_mem0.installer.qdrant import (
+    configure_qdrant,
+    detect_qdrant_container,
+    start_qdrant_container,
+)
 
 
 # ------------------------------------------------------------------
@@ -142,7 +142,7 @@ def _build_execution_plan(
     )
 
     # Ollama install (only if needed and not yet present)
-    if needs_ollama and not detect_ollama():
+    if needs_ollama and not ollama.detect():
         steps.append(Step("install_ollama", "安装 Ollama", weight=15))
 
     # Ollama service
@@ -163,12 +163,10 @@ def _build_execution_plan(
 
     # Docker + Qdrant
     if qdrant_config.get("mode") == "docker":
-        if not _is_docker_ready():
-            if _is_docker_installed():
-                # Installed but not running — just need to launch
+        if not docker.is_ready():
+            if docker.is_installed():
                 steps.append(Step("launch_docker", "启动 Docker Desktop", weight=10))
             else:
-                # Not installed at all
                 steps.append(Step("install_docker", "安装 Docker", weight=15))
                 steps.append(Step("launch_docker", "启动 Docker Desktop", weight=10))
         steps.append(Step("pull_qdrant", "拉取 Qdrant 镜像", weight=10))
@@ -199,35 +197,43 @@ def _execute_plan(
     # ── Install Ollama ────────────────────────────────────────────
     if "install_ollama" in step_keys:
         success, output = tracker.run_subprocess(
-            _ollama_install_cmd(), "install_ollama",
+            ollama.install_cmd(), "install_ollama",
         )
-        # winget returns non-zero when package is already installed
-        already_installed = "已安装" in output or "already installed" in output.lower()
+        already_installed = (
+            "已安装" in output or "already installed" in output.lower()
+        )
         if success or already_installed:
             tracker.print("[green]  ✓ Ollama 安装成功[/green]")
         else:
-            tracker.print("[red]  ✗ Ollama 安装失败，请手动安装: https://ollama.ai[/red]")
+            tracker.print(
+                "[red]  ✗ Ollama 安装失败，"
+                "请手动安装: https://ollama.ai[/red]",
+            )
             _print_error_detail(tracker, output)
 
-        # On Windows, winget installs may not be on current PATH — find the binary
-        resolved = _resolve_ollama_path()
+        # On Windows, winget installs may not be on current PATH
+        resolved = ollama.resolve_path()
         if resolved:
             ollama_bin = resolved
 
     # ── Start Ollama ──────────────────────────────────────────────
     if "start_ollama" in step_keys:
         tracker.begin_step("start_ollama")
-        _ensure_ollama_ready(tracker, ollama_bin=ollama_bin)
+        ollama.ensure_ready(tracker, ollama_bin=ollama_bin)
         tracker.complete_step("start_ollama")
 
     # ── Pull models ───────────────────────────────────────────────
+    non_model_pulls = {"pull_qdrant"}
     models_to_pull = [
-        s.key.removeprefix("pull_") for s in steps if s.key.startswith("pull_")
+        s.key.removeprefix("pull_")
+        for s in steps
+        if s.key.startswith("pull_") and s.key not in non_model_pulls
     ]
     for model in models_to_pull:
         key = f"pull_{model}"
         success, output = tracker.run_subprocess(
-            [ollama_bin, "pull", model], key, parse_pct=True,
+            ollama.pull_cmd(model, ollama_bin=ollama_bin),
+            key, parse_pct=True,
         )
         if success:
             tracker.print(f"[green]  ✓ 模型 {model} 就绪[/green]")
@@ -239,75 +245,98 @@ def _execute_plan(
     # ── Install Docker ────────────────────────────────────────────
     if "install_docker" in step_keys:
         success, output = tracker.run_subprocess(
-            _docker_install_cmd(), "install_docker",
+            docker.install_cmd(), "install_docker",
         )
-        already_installed = "已安装" in output or "already installed" in output.lower()
+        already_installed = (
+            "已安装" in output or "already installed" in output.lower()
+        )
         if success or already_installed:
             tracker.print("[green]  ✓ Docker 已安装[/green]")
         else:
-            tracker.print("[red]  ✗ Docker 安装失败，请手动安装: https://docker.com[/red]")
+            tracker.print(
+                "[red]  ✗ Docker 安装失败，"
+                "请手动安装: https://docker.com[/red]",
+            )
             _print_error_detail(tracker, output)
 
     # ── Launch Docker Desktop ─────────────────────────────────────
     if "launch_docker" in step_keys:
         tracker.begin_step("launch_docker")
-        _launch_docker_desktop(tracker)
+        docker.launch_desktop(tracker)
         tracker.complete_step("launch_docker")
 
     # ── Pull + Start Qdrant ──────────────────────────────────────
     if "pull_qdrant" in step_keys:
-        port = qdrant_config.get("port", 6333)
-
-        # Check if already running — skip both pull and start
-        already_running = False
-        try:
-            result = subprocess.run(
-                ["docker", "ps", "--filter", "ancestor=qdrant/qdrant", "--format", "{{.Names}}"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.stdout.strip():
-                already_running = True
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-        if already_running:
-            tracker.begin_step("pull_qdrant")
-            tracker.print(f"[green]  ✓ Qdrant 容器已在运行 (port {port})[/green]")
-            tracker.complete_step("pull_qdrant")
-            tracker.begin_step("start_qdrant")
-            tracker.complete_step("start_qdrant")
-        else:
-            # Pull image
-            pull_ok, pull_out = tracker.run_subprocess(
-                ["docker", "pull", "qdrant/qdrant"], "pull_qdrant", parse_pct=True,
-            )
-            if pull_ok:
-                tracker.print("[green]  ✓ Qdrant 镜像就绪[/green]")
-            else:
-                tracker.print("[red]  ✗ Qdrant 镜像拉取失败[/red]")
-                _print_error_detail(tracker, pull_out)
-
-            # Start container
-            tracker.begin_step("start_qdrant")
-            if pull_ok:
-                data_path = qdrant_config.get("data_path", "~/.local/share/agent-mem0")
-                ok = _start_qdrant_container(port, data_path=data_path)
-                if ok:
-                    tracker.print(f"[green]  ✓ Qdrant 已启动 (port {port})[/green]")
-                else:
-                    tracker.print("[red]  ✗ Qdrant 容器启动失败[/red]")
-            tracker.complete_step("start_qdrant")
+        _execute_qdrant_steps(tracker, qdrant_config)
 
     # ── Save config ───────────────────────────────────────────────
+    _execute_save_config(tracker, llm_config, embedder_config, qdrant_config)
+
+    # ── Inject CLAUDE.md rules ────────────────────────────────────
+    tracker.begin_step("inject_rules")
+    inject_claude_md_rules(quiet=True)
+    tracker.print("[green]  ✓ CLAUDE.md 记忆规则已写入[/green]")
+    tracker.complete_step("inject_rules")
+
+
+def _execute_qdrant_steps(
+    tracker: InstallProgress,
+    qdrant_config: dict,
+) -> None:
+    """Execute Qdrant pull and start steps."""
+    port = qdrant_config.get("port", 6333)
+
+    # Check if already running — skip both pull and start
+    if detect_qdrant_container():
+        tracker.begin_step("pull_qdrant")
+        tracker.print(
+            f"[green]  ✓ Qdrant 容器已在运行 (port {port})[/green]",
+        )
+        tracker.complete_step("pull_qdrant")
+        tracker.begin_step("start_qdrant")
+        tracker.complete_step("start_qdrant")
+        return
+
+    # Pull image
+    pull_ok, pull_out = tracker.run_subprocess(
+        ["docker", "pull", "qdrant/qdrant"], "pull_qdrant", parse_pct=True,
+    )
+    if pull_ok:
+        tracker.print("[green]  ✓ Qdrant 镜像就绪[/green]")
+    else:
+        tracker.print("[red]  ✗ Qdrant 镜像拉取失败[/red]")
+        _print_error_detail(tracker, pull_out)
+
+    # Start container
+    tracker.begin_step("start_qdrant")
+    if pull_ok:
+        data_path = qdrant_config.get("data_path", "~/.local/share/agent-mem0")
+        ok = start_qdrant_container(port, data_path=data_path)
+        if ok:
+            tracker.print(f"[green]  ✓ Qdrant 已启动 (port {port})[/green]")
+        else:
+            tracker.print("[red]  ✗ Qdrant 容器启动失败[/red]")
+    tracker.complete_step("start_qdrant")
+
+
+def _execute_save_config(
+    tracker: InstallProgress,
+    llm_config: dict,
+    embedder_config: dict,
+    qdrant_config: dict,
+) -> None:
+    """Build merged config and save to disk."""
     tracker.begin_step("save_config")
     config = DEFAULT_CONFIG.copy()
     config["llm"] = {**config["llm"], **llm_config}
     config["embedder"] = {**config["embedder"], **embedder_config}
     config["vector_store"] = {**config["vector_store"], **qdrant_config}
+
     # Detect real embedding dimensions from the model
     dims = _detect_embedding_dims(embedder_config)
     config["vector_store"]["embedding_model_dims"] = dims
     tracker.print(f"[dim]  检测到 embedding 维度: {dims}[/dim]")
+
     # Build overrides: only user-chosen values that differ from defaults
     overrides: dict[str, dict] = {}
     for section in ("llm", "embedder", "vector_store"):
@@ -321,209 +350,26 @@ def _execute_plan(
     tracker.print("[green]  ✓ 配置已保存到 ~/.agent-mem0/config.yaml[/green]")
     tracker.complete_step("save_config")
 
-    # ── Inject CLAUDE.md rules ────────────────────────────────────
-    tracker.begin_step("inject_rules")
-    inject_claude_md_rules(quiet=True)
-    tracker.print("[green]  ✓ CLAUDE.md 记忆规则已写入[/green]")
-    tracker.complete_step("inject_rules")
-
 
 # ------------------------------------------------------------------
-# Low-level helpers (avoid conflicting console output from provider
-# modules by calling subprocess directly here)
+# Helpers
 # ------------------------------------------------------------------
 
 def _print_error_detail(tracker: InstallProgress, output: str) -> None:
-    """Print the last meaningful line of error output."""
-    lines = [l.strip() for l in output.strip().splitlines() if l.strip()]
+    """Print the last meaningful lines of error output."""
+    lines = [ln.strip() for ln in output.strip().splitlines() if ln.strip()]
     if lines:
-        # Show last 3 lines max
         for line in lines[-3:]:
             tracker.print(f"[dim]    {line[:200]}[/dim]")
 
 
-def _resolve_ollama_path() -> str | None:
-    """Find Ollama binary path, even if not on current PATH.
-
-    On Windows, winget installs to a user-specific directory that may
-    not be on PATH until the terminal is restarted. This function
-    checks common install locations.
-    """
-    # Already on PATH
-    found = shutil.which("ollama")
-    if found:
-        return found
-
-    if platform.system().lower() != "windows":
-        return None
-
-    # Common winget / manual install locations on Windows
-    from pathlib import Path
-    candidates = [
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
-        Path(os.environ.get("PROGRAMFILES", "")) / "Ollama" / "ollama.exe",
-        Path(os.environ.get("USERPROFILE", "")) / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
-    ]
-    for p in candidates:
-        if p.exists():
-            return str(p)
-    return None
-
-
-def _ensure_ollama_ready(tracker: InstallProgress, *, ollama_bin: str = "ollama") -> None:
-    """Ensure Ollama service is running with retries."""
-    import time
-
-    # First check if already running
-    try:
-        result = subprocess.run(
-            [ollama_bin, "list"], capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0:
-            tracker.print("[green]  ✓ Ollama 服务已就绪[/green]")
-            return
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    # Start the service
-    tracker.update_description("启动 Ollama 服务...")
-    try:
-        subprocess.Popen(
-            [ollama_bin, "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        tracker.print("[yellow]  ⚠ Ollama 命令未找到，可能需要重启终端刷新 PATH[/yellow]")
-        return
-
-    # Wait with retries (up to 15 seconds)
-    for i in range(15):
-        time.sleep(1)
-        tracker.update_description(f"等待 Ollama 就绪... ({i + 1}s)")
-        try:
-            result = subprocess.run(
-                [ollama_bin, "list"], capture_output=True, text=True, timeout=3,
-            )
-            if result.returncode == 0:
-                tracker.print("[green]  ✓ Ollama 服务已就绪[/green]")
-                return
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-    tracker.print("[yellow]  ⚠ Ollama 服务可能未完全就绪，继续尝试...[/yellow]")
-
-
-def _is_docker_ready() -> bool:
-    """Check if Docker daemon is running and responsive."""
-    try:
-        result = subprocess.run(
-            ["docker", "info"], capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
-
-
-def _is_docker_installed() -> bool:
-    """Check if Docker is installed (but maybe not running).
-
-    On macOS, checks /Applications/Docker.app.
-    Also checks if ``docker`` CLI is on PATH.
-    """
-    if shutil.which("docker"):
-        return True
-    if platform.system().lower() == "darwin":
-        from pathlib import Path
-        return Path("/Applications/Docker.app").exists()
-    return False
-
-
-def _launch_docker_desktop(tracker: InstallProgress) -> None:
-    """Launch Docker Desktop and wait for it to be ready."""
-    import time
-
-    system = platform.system().lower()
-    if system == "darwin":
-        subprocess.run(["open", "-a", "Docker"], capture_output=True)
-    elif system == "linux":
-        subprocess.Popen(
-            ["systemctl", "start", "docker"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-
-    # Wait for Docker to be ready (up to 60 seconds)
-    for i in range(60):
-        time.sleep(1)
-        if i % 5 == 4:
-            tracker.update_description(f"等待 Docker 就绪... ({i + 1}s)")
-        try:
-            result = subprocess.run(
-                ["docker", "info"], capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
-                tracker.print("[green]  ✓ Docker 已就绪[/green]")
-                return
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-
-    tracker.print("[yellow]  ⚠ Docker 未能在 60s 内就绪，请手动启动[/yellow]")
-
-
-def _ollama_install_cmd() -> list[str]:
-    """Return the install command for Ollama on the current platform."""
-    system = platform.system().lower()
-    if system == "darwin" and shutil.which("brew"):
-        return ["brew", "install", "ollama"]
-    if system == "linux":
-        return ["sh", "-c", "curl -fsSL https://ollama.ai/install.sh | sh"]
-    if system == "windows" and shutil.which("winget"):
-        return ["winget", "install", "--id", "Ollama.Ollama", "-e", "--accept-source-agreements"]
-    # Fallback — will fail gracefully, wizard prints manual instructions
-    return ["ollama", "--version"]
-
-
-def _docker_install_cmd() -> list[str]:
-    """Return the install command for Docker on the current platform."""
-    system = platform.system().lower()
-    if system == "darwin" and shutil.which("brew"):
-        return ["brew", "install", "--cask", "docker"]
-    if system == "linux":
-        return ["sh", "-c", "curl -fsSL https://get.docker.com | sh"]
-    if system == "windows" and shutil.which("winget"):
-        return ["winget", "install", "--id", "Docker.DockerDesktop", "-e", "--accept-source-agreements"]
-    return ["docker", "--version"]
-
-
-def _start_qdrant_container(port: int, data_path: str = "~/.local/share/agent-mem0") -> bool:
-    """Create and start the Qdrant Docker container with volume mapping."""
-    from pathlib import Path
-    storage_path = Path(data_path).expanduser() / "qdrant_storage"
-    storage_path.mkdir(parents=True, exist_ok=True)
-
-    result = subprocess.run(
-        [
-            "docker", "run", "-d",
-            "--name", "agent-mem0-qdrant",
-            "-p", f"{port}:6333",
-            "-v", f"{storage_path}:/qdrant/storage",
-            "--restart", "unless-stopped",
-            "qdrant/qdrant",
-        ],
-        capture_output=True, text=True,
-    )
-    if result.returncode == 0:
-        return True
-
-    # Container name conflict — try restart
-    if "already in use" in result.stderr:
-        restart = subprocess.run(
-            ["docker", "start", "agent-mem0-qdrant"],
-            capture_output=True, text=True,
-        )
-        return restart.returncode == 0
-
-    return False
+# Known embedding dimensions for common models
+_KNOWN_DIMS: dict[str, int] = {
+    "text-embedding-3-large": 3072,
+    "text-embedding-3-small": 1536,
+    "text-embedding-ada-002": 1536,
+    "nomic-embed-text": 768,
+}
 
 
 def _detect_embedding_dims(embedder_config: dict) -> int:
@@ -533,21 +379,23 @@ def _detect_embedding_dims(embedder_config: dict) -> int:
 
     try:
         if provider == "ollama":
-            import ollama
+            import ollama as ollama_client  # Delayed: heavy third-party lib
             base_url = embedder_config.get("base_url", "http://localhost:11434")
-            client = ollama.Client(host=base_url)
+            client = ollama_client.Client(host=base_url)
             resp = client.embed(model=model, input="dimension probe")
             embeddings = resp.get("embeddings", [[]])
             if embeddings and embeddings[0]:
                 return len(embeddings[0])
 
         elif provider in ("openai", "litellm"):
-            import urllib.request
             import json as _json
+            import urllib.request
             base_url = embedder_config.get("base_url", "https://api.openai.com/v1")
             api_key = embedder_config.get("api_key", "")
             url = f"{base_url.rstrip('/')}/embeddings"
-            payload = _json.dumps({"model": model, "input": "dimension probe"}).encode()
+            payload = _json.dumps(
+                {"model": model, "input": "dimension probe"},
+            ).encode()
             req = urllib.request.Request(
                 url, data=payload, method="POST",
                 headers={
@@ -564,13 +412,6 @@ def _detect_embedding_dims(embedder_config: dict) -> int:
         pass
 
     # Fallback: known dimensions for common models
-    _KNOWN_DIMS = {
-        "text-embedding-3-large": 3072,
-        "text-embedding-3-small": 1536,
-        "text-embedding-ada-002": 1536,
-        "nomic-embed-text": 768,
-    }
-    # Strip provider prefix for lookup (e.g., "azure_openai/text-embedding-3-large")
     model_name = model.split("/")[-1] if "/" in model else model
     if model_name in _KNOWN_DIMS:
         return _KNOWN_DIMS[model_name]

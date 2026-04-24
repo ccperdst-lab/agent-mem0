@@ -1,15 +1,11 @@
-"""Provider detection, installation, and configuration."""
+"""Interactive provider configuration (LLM and Embedder selection)."""
 
 from __future__ import annotations
 
-import platform
-import shutil
-import subprocess
+from rich.prompt import Prompt
 
-from rich.console import Console
-from rich.prompt import Confirm, Prompt
-
-console = Console()
+from agent_mem0.installer import ollama
+from agent_mem0.installer.output import console
 
 LLM_PROVIDERS = ["ollama", "openai", "anthropic", "litellm", "custom"]
 EMBEDDER_PROVIDERS = ["ollama", "openai", "litellm", "custom"]
@@ -26,79 +22,6 @@ DEFAULT_EMBEDDER_MODELS: dict[str, str] = {
     "openai": "text-embedding-3-small",
     "litellm": "openai/your-embedding-model",
 }
-
-
-def detect_ollama() -> bool:
-    """Check if Ollama is installed and running."""
-    return shutil.which("ollama") is not None
-
-
-def install_ollama() -> bool:
-    """Install Ollama based on OS and architecture."""
-    system = platform.system().lower()
-    arch = platform.machine().lower()
-
-    console.print(f"\n[yellow]检测到系统: {system} ({arch})[/yellow]")
-
-    if system == "darwin":
-        if shutil.which("brew"):
-            console.print("[cyan]通过 Homebrew 安装 Ollama...[/cyan]")
-            result = subprocess.run(["brew", "install", "ollama"], capture_output=True, text=True)
-            if result.returncode == 0:
-                console.print("[green]✓ Ollama 安装成功[/green]")
-                return True
-        console.print("[yellow]请从 https://ollama.ai 下载安装 Ollama[/yellow]")
-        return False
-
-    elif system == "linux":
-        console.print("[cyan]通过官方脚本安装 Ollama...[/cyan]")
-        result = subprocess.run(
-            ["sh", "-c", "curl -fsSL https://ollama.ai/install.sh | sh"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            console.print("[green]✓ Ollama 安装成功[/green]")
-            return True
-        console.print(f"[red]安装失败: {result.stderr}[/red]")
-        return False
-
-    else:
-        console.print(f"[yellow]不支持自动安装 Ollama on {system}，请手动安装: https://ollama.ai[/yellow]")
-        return False
-
-
-def pull_ollama_model(model: str) -> bool:
-    """Pull an Ollama model."""
-    console.print(f"[cyan]拉取模型 {model}...[/cyan]")
-    result = subprocess.run(["ollama", "pull", model], capture_output=False)
-    if result.returncode == 0:
-        console.print(f"[green]✓ 模型 {model} 就绪[/green]")
-        return True
-    console.print(f"[red]模型拉取失败，请手动运行: ollama pull {model}[/red]")
-    return False
-
-
-def ensure_ollama_running() -> bool:
-    """Ensure Ollama service is running."""
-    try:
-        result = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        console.print("[yellow]Ollama 服务未运行，尝试启动...[/yellow]")
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        import time
-        time.sleep(2)
-        return True
 
 
 def configure_llm_provider() -> dict:
@@ -118,7 +41,7 @@ def configure_llm_provider() -> dict:
     config: dict = {"provider": provider}
 
     if provider == "ollama":
-        if not detect_ollama():
+        if not ollama.detect():
             console.print("[yellow]未检测到 Ollama，将在后续步骤中自动安装[/yellow]")
         config["model"] = Prompt.ask("LLM 模型", default=DEFAULT_LLM_MODELS["ollama"])
         config["base_url"] = Prompt.ask("Ollama 地址", default="http://localhost:11434")
@@ -176,17 +99,3 @@ def configure_embedder_provider() -> dict:
         config["custom_class"] = Prompt.ask("Python 类路径 (例: my_module.MyEmbedder)")
 
     return config
-
-
-def setup_ollama_models(llm_config: dict, embedder_config: dict) -> None:
-    """Pull required Ollama models if provider is Ollama."""
-    models_to_pull = set()
-    if llm_config.get("provider") == "ollama":
-        models_to_pull.add(llm_config.get("model", DEFAULT_LLM_MODELS["ollama"]))
-    if embedder_config.get("provider") == "ollama":
-        models_to_pull.add(embedder_config.get("model", DEFAULT_EMBEDDER_MODELS["ollama"]))
-
-    if models_to_pull:
-        ensure_ollama_running()
-        for model in models_to_pull:
-            pull_ollama_model(model)

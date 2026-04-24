@@ -6,27 +6,20 @@ import json
 import sys
 from pathlib import Path
 
-from rich.console import Console
-
-console = Console()
+from agent_mem0.installer.output import console
 
 MARKER_START = "<!-- agent-mem0-start -->"
 MARKER_END = "<!-- agent-mem0-end -->"
 
 
 def _load_template() -> str:
-    """Load the global memory rules template."""
-    # Try to find templates relative to package
-    template_paths = [
-        Path(__file__).parent.parent.parent.parent / "templates" / "claude_global_memory_rules.md",
-        Path(__file__).parent.parent / "templates" / "claude_global_memory_rules.md",
-    ]
-    for p in template_paths:
-        if p.exists():
-            return p.read_text(encoding="utf-8")
-
-    # Fallback inline template
-    return _FALLBACK_TEMPLATE
+    """Load the global memory rules template via importlib.resources."""
+    try:
+        from importlib import resources
+        ref = resources.files("agent_mem0") / "templates" / "claude_global_memory_rules.md"
+        return ref.read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError, TypeError):
+        return _FALLBACK_TEMPLATE
 
 
 _FALLBACK_TEMPLATE = """\
@@ -149,18 +142,12 @@ def write_project_skill(project_dir: Path) -> None:
     skill_path = skill_dir / "SKILL.md"
     skill_dir.mkdir(parents=True, exist_ok=True)
 
-    # Try to load from templates
-    template_paths = [
-        Path(__file__).parent.parent.parent.parent / "templates" / "skill.md",
-        Path(__file__).parent.parent / "templates" / "skill.md",
-    ]
-    content = None
-    for p in template_paths:
-        if p.exists():
-            content = p.read_text(encoding="utf-8")
-            break
-
-    if content is None:
+    # Load from package resources, fallback to inline
+    try:
+        from importlib import resources
+        ref = resources.files("agent_mem0") / "templates" / "skill.md"
+        content = ref.read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError, TypeError):
         content = _FALLBACK_SKILL
 
     skill_path.write_text(content, encoding="utf-8")

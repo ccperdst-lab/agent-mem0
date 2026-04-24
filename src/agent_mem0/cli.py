@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import click
-from rich.console import Console
 
 from agent_mem0 import __version__
-
-console = Console()
+from agent_mem0.installer.output import console
 
 
 @click.group()

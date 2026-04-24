@@ -11,14 +11,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from rich.console import Console
 from rich.prompt import Confirm
 
 from agent_mem0.config import AGENT_MEM0_HOME, CONFIG_PATH
 from agent_mem0.installer.claude_code import MARKER_END, MARKER_START
+from agent_mem0.installer.output import console
 from agent_mem0.installer.registry import load_registry
-
-console = Console()
 
 
 def _get_data_path(config: dict | None) -> Path:

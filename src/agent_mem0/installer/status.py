@@ -5,14 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from agent_mem0.config import CONFIG_PATH, load_config
+from agent_mem0.installer.output import console
 from agent_mem0.installer.registry import load_registry
-
-console = Console()
 
 
 def _check_qdrant(config: dict) -> tuple[str, str]:
