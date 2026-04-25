@@ -142,7 +142,7 @@
 # provider: reranker 提供商
 #   可选值: none / sentence_transformer / llm_reranker / cohere / huggingface
 #   - none: 禁用精排（默认，行为与当前一致）
-#   - sentence_transformer: 轻量级 cross-encoder 模型（需安装 pip install agent-mem0[reranker]）
+#   - sentence_transformer: 轻量级 cross-encoder 模型（需安装 pip install mcp-mem0[reranker]）
 #   - llm_reranker: 使用 LLM 做精排（较重，但效果好）
 #   - cohere: Cohere Rerank API
 #   - huggingface: HuggingFace 模型
