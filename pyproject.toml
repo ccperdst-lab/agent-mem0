@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-mem0"
+name = "mcp-mem0"
 version = "0.2.0"
 description = "Cross-session memory system for AI Agent tools, powered by mem0 + Qdrant + MCP"
 readme = "README.md"

@@ -1,7 +1,7 @@
 # agent-mem0
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![PyPI version](https://img.shields.io/pypi/v/agent-mem0.svg)](https://pypi.org/project/agent-mem0/)
+[![PyPI version](https://img.shields.io/pypi/v/mcp-mem0.svg)](https://pypi.org/project/mcp-mem0/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 
 [English](README-en.md)
@@ -38,7 +38,7 @@ graph LR
 ### 1. 安装
 
 ```bash
-pip install agent-mem0
+pip install mcp-mem0
 ```
 
 或从源码安装：
@@ -219,7 +219,7 @@ reranker:
     top_k: 10
 ```
 
-需要额外安装：`pip install agent-mem0[reranker]`
+需要额外安装：`pip install mcp-mem0[reranker]`
 
 ## CLI 命令
 
