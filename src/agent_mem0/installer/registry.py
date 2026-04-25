@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from agent_mem0.config import AGENT_MEM0_HOME
+from agent_mem0.config import CONFIG_DIR
 
-REGISTRY_PATH = AGENT_MEM0_HOME / "projects.json"
+REGISTRY_PATH = CONFIG_DIR / "projects.json"
 
 
 def load_registry() -> dict[str, Any]:

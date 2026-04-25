@@ -7,7 +7,7 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
-from agent_mem0.config import AGENT_MEM0_HOME, CONFIG_PATH
+from agent_mem0.config import CONFIG_DIR, CONFIG_PATH
 from agent_mem0.installer.claude_code import write_project_mcp_json, write_project_skill
 from agent_mem0.installer.output import console
 from agent_mem0.installer.registry import register_project
@@ -19,7 +19,7 @@ def run_setup(project_name: str | None = None) -> None:
 
     # Check if install has been run
     if not CONFIG_PATH.exists():
-        console.print(f"[red]✗ 未找到全局配置文件 {AGENT_MEM0_HOME}/config.yaml[/red]")
+        console.print(f"[red]✗ 未找到全局配置文件 {CONFIG_DIR}/config.yaml[/red]")
         console.print("  请先运行 [cyan]agent-mem0 install[/cyan] 完成全局安装")
         raise SystemExit(1)
 

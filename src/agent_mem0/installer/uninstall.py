@@ -13,7 +13,7 @@ from pathlib import Path
 
 from rich.prompt import Confirm
 
-from agent_mem0.config import AGENT_MEM0_HOME, CONFIG_PATH
+from agent_mem0.config import CONFIG_DIR, CONFIG_PATH, DATA_DIR
 from agent_mem0.installer.claude_code import MARKER_END, MARKER_START
 from agent_mem0.installer.output import console
 from agent_mem0.installer.registry import load_registry
@@ -23,8 +23,8 @@ def _get_data_path(config: dict | None) -> Path:
     """Get the data_path from config, with fallback to default."""
     if config:
         vs = config.get("vector_store", {})
-        return Path(vs.get("data_path", "~/.local/share/agent-mem0")).expanduser()
-    return Path("~/.local/share/agent-mem0").expanduser()
+        return Path(vs.get("data_path", str(DATA_DIR))).expanduser()
+    return DATA_DIR
 
 
 def run_uninstall(*, purge: bool = False, force: bool = False) -> None:
@@ -52,7 +52,7 @@ def run_uninstall(*, purge: bool = False, force: bool = False) -> None:
 
     console.print("\n[bold]全局文件:[/bold]")
     console.print("  • ~/.claude/CLAUDE.md (agent-mem0 规则区块)")
-    console.print(f"  • {AGENT_MEM0_HOME}/ (配置、日志、注册表)")
+    console.print(f"  • {CONFIG_DIR}/ (配置、注册表)")
 
     console.print("\n[bold]Qdrant:[/bold]")
     console.print("  • agent_mem0 collection")
@@ -205,15 +205,15 @@ def _clean_qdrant_collection(config: dict | None) -> None:
 
 
 def _clean_home_dir() -> None:
-    """Remove ~/.agent-mem0/ config directory (preserves data directory)."""
-    if not AGENT_MEM0_HOME.exists():
+    """Remove config directory (preserves data directory)."""
+    if not CONFIG_DIR.exists():
         return
 
     try:
-        shutil.rmtree(AGENT_MEM0_HOME)
-        console.print(f"  ✓ 删除 {AGENT_MEM0_HOME}/")
+        shutil.rmtree(CONFIG_DIR)
+        console.print(f"  ✓ 删除 {CONFIG_DIR}/")
     except OSError as e:
-        console.print(f"  [yellow]⚠ 删除 {AGENT_MEM0_HOME} 失败: {e}[/yellow]")
+        console.print(f"  [yellow]⚠ 删除 {CONFIG_DIR} 失败: {e}[/yellow]")
 
 
 def _clean_data_dir(data_path: Path) -> None:

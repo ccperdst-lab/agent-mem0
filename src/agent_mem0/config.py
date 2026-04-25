@@ -6,10 +6,13 @@ import os
 from pathlib import Path
 from typing import Any
 
+import platformdirs
 import yaml
 
-AGENT_MEM0_HOME = Path(os.environ.get("AGENT_MEM0_HOME", "~/.agent-mem0")).expanduser()
-CONFIG_PATH = AGENT_MEM0_HOME / "config.yaml"
+CONFIG_DIR = Path(platformdirs.user_config_dir("agent-mem0"))
+DATA_DIR = Path(platformdirs.user_data_dir("agent-mem0"))
+LOG_DIR = Path(platformdirs.user_log_dir("agent-mem0"))
+CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "llm": {
@@ -34,7 +37,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode": "docker",  # docker | local | external
         "host": "localhost",
         "port": 6333,
-        "data_path": "~/.local/share/agent-mem0",
+        "data_path": str(DATA_DIR),
         "collection_name": "agent_mem0",
         "embedding_model_dims": 768,  # nomic-embed-text=768, openai=1536
     },
@@ -58,7 +61,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "level": "info",
         "max_size_mb": 10,
         "max_files": 3,
-        "path": str(AGENT_MEM0_HOME / "logs" / "agent-mem0.log"),
+        "path": str(LOG_DIR / "agent-mem0.log"),
     },
 }
 
@@ -289,7 +292,7 @@ def build_mem0_config(config: dict[str, Any], project: str) -> dict[str, Any]:
         vs_section["config"]["host"] = vs_cfg["host"]
         vs_section["config"]["port"] = vs_cfg["port"]
     else:  # local
-        data_path = Path(vs_cfg.get("data_path", "~/.local/share/agent-mem0")).expanduser()
+        data_path = Path(vs_cfg.get("data_path", str(DATA_DIR))).expanduser()
         vs_section["config"]["path"] = str(data_path / "qdrant_storage")
     mem0_config["vector_store"] = vs_section
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.table import Table
 
-from agent_mem0.config import CONFIG_PATH, load_config
+from agent_mem0.config import CONFIG_PATH, DATA_DIR, load_config
 from agent_mem0.installer.output import console
 from agent_mem0.installer.registry import load_registry
 
@@ -19,7 +19,7 @@ def _check_qdrant(config: dict) -> tuple[str, str]:
     mode = vs.get("mode", "docker")
 
     if mode == "local":
-        data_path = Path(vs.get("data_path", "~/.local/share/agent-mem0")).expanduser()
+        data_path = Path(vs.get("data_path", str(DATA_DIR))).expanduser()
         storage_path = data_path / "qdrant_storage"
         if storage_path.exists():
             return "✅", f"Local ({storage_path})"
@@ -100,7 +100,7 @@ def show_status() -> None:
 
     # Data path
     vs = config.get("vector_store", {})
-    data_path = Path(vs.get("data_path", "~/.local/share/agent-mem0")).expanduser()
+    data_path = Path(vs.get("data_path", str(DATA_DIR))).expanduser()
     storage_path = data_path / "qdrant_storage"
     if storage_path.exists():
         table.add_row("数据目录", f"✅ {storage_path}")

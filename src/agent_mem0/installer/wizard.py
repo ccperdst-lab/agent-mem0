@@ -16,7 +16,7 @@ import urllib.request
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
-from agent_mem0.config import AGENT_MEM0_HOME, DEFAULT_CONFIG, save_config_from_template
+from agent_mem0.config import CONFIG_DIR, DATA_DIR, DEFAULT_CONFIG, save_config_from_template
 from agent_mem0.installer import docker, ollama
 from agent_mem0.installer.claude_code import inject_claude_md_rules
 from agent_mem0.installer.hardware import detect_ram_gb, recommend_llm_model
@@ -582,7 +582,7 @@ def _execute_qdrant_steps(
     # Start container
     tracker.begin_step("start_qdrant")
     if pull_ok:
-        data_path = qdrant_config.get("data_path", "~/.local/share/agent-mem0")
+        data_path = qdrant_config.get("data_path", str(DATA_DIR))
         ok = start_qdrant_container(port, data_path=data_path)
         if ok:
             tracker.print(f"[green]  ✓ Qdrant 已启动 (port {port})[/green]")
@@ -619,7 +619,7 @@ def _execute_save_config(
         if section_overrides:
             overrides[section] = section_overrides
     save_config_from_template(overrides)
-    tracker.print(f"[green]  ✓ 配置已保存到 {AGENT_MEM0_HOME}/config.yaml[/green]")
+    tracker.print(f"[green]  ✓ 配置已保存到 {CONFIG_DIR}/config.yaml[/green]")
     tracker.complete_step("save_config")
 
 

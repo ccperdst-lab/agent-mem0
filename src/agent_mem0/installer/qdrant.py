@@ -11,6 +11,7 @@ from pathlib import Path
 
 from rich.prompt import Prompt
 
+from agent_mem0.config import DATA_DIR
 from agent_mem0.installer.output import console
 
 
@@ -30,7 +31,7 @@ def detect_qdrant_container() -> bool:
 def start_qdrant_container(
     port: int = 6333,
     *,
-    data_path: str = "~/.local/share/agent-mem0",
+    data_path: str = str(DATA_DIR),
 ) -> bool:
     """Create and start the Qdrant Docker container with volume mapping."""
     storage_path = Path(data_path).expanduser() / "qdrant_storage"
@@ -71,7 +72,7 @@ def configure_qdrant() -> dict:
 
     choice = Prompt.ask("选择", default="1")
 
-    default_data_path = "~/.local/share/agent-mem0"
+    default_data_path = str(DATA_DIR)
 
     if choice == "4":
         mode = "external"

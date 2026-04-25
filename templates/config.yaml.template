@@ -79,7 +79,7 @@
 #   - docker 模式: 作为 volume 映射源，映射到容器内 /qdrant/storage
 #   - local 模式: Qdrant 直接读写的存储目录
 #   实际存储路径为 {data_path}/qdrant_storage/
-#   默认: ~/.local/share/agent-mem0
+#   默认: 由 platformdirs 按平台决定（Linux: ~/.local/share/agent-mem0, macOS: ~/Library/Application Support/agent-mem0, Windows: %LOCALAPPDATA%\agent-mem0）
 #
 # collection_name: Qdrant collection 名称
 #   默认: agent_mem0（通常无需修改）
@@ -92,7 +92,7 @@
 #   mode: docker
 #   host: localhost
 #   port: 6333
-#   data_path: ~/.local/share/agent-mem0
+#   data_path: <platformdirs data dir>
 #   collection_name: agent_mem0
 #   embedding_model_dims: 768
 
@@ -176,10 +176,10 @@
 #   默认: 3
 #
 # path: 日志文件路径
-#   默认: ~/.agent-mem0/logs/agent-mem0.log
+#   默认: 由 platformdirs 按平台决定（Linux: ~/.local/state/agent-mem0/log/, macOS: ~/Library/Logs/agent-mem0/, Windows: %LOCALAPPDATA%\agent-mem0\Logs\）
 #
 # log:
 #   level: info
 #   max_size_mb: 10
 #   max_files: 3
-#   path: ~/.agent-mem0/logs/agent-mem0.log
+#   path: <platformdirs log dir>/agent-mem0.log
