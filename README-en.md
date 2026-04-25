@@ -1,6 +1,7 @@
 # agent-mem0
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://img.shields.io/pypi/v/agent-mem0.svg)](https://pypi.org/project/agent-mem0/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 
 [中文文档](README.md)
@@ -24,7 +25,7 @@ graph LR
 - **mem0** handles semantic understanding of memories — extracting key information, detecting conflicts between old and new memories, and automatically merging updates
 - **LLM** provides semantic capabilities for mem0 (e.g., recognizing that "user likes pytest" and "user prefers pytest framework" are the same memory)
 - **Embedder** converts text into vectors for similarity search in Qdrant
-- **Qdrant** stores and retrieves memory vectors, supporting both Docker and pure local modes
+- **Qdrant** stores and retrieves memory vectors, supporting Docker, pure local, and external connection modes
 
 ## Quick Start
 
@@ -37,6 +38,12 @@ graph LR
 ### 1. Install
 
 ```bash
+pip install agent-mem0
+```
+
+Or install from source:
+
+```bash
 git clone https://github.com/ccperdst-lab/agent-mem0.git
 cd agent-mem0
 pip install -e .
@@ -44,17 +51,31 @@ pip install -e .
 
 ### 2. Global Setup (one-time)
 
+**Interactive wizard:**
+
 ```bash
 agent-mem0 install
 ```
 
-The interactive wizard will guide you through:
+The wizard will guide you through:
 - Choosing an LLM Provider (Ollama / OpenAI / Anthropic / LiteLLM)
 - Choosing an Embedding Provider (Ollama / OpenAI / LiteLLM)
-- Configuring Qdrant storage mode (Docker / Local)
+- Configuring Qdrant storage mode (Docker / Local / External)
 - Auto-detecting and installing Ollama, Docker (if needed)
 - Pulling required models and images
 - Writing config file and CLAUDE.md memory rules
+
+**Non-interactive mode (CI/automation):**
+
+```bash
+# Use recommended preset (auto-detects hardware to choose models)
+agent-mem0 install --default
+
+# Specify a preset
+agent-mem0 install --default --preset cloud --api-key "sk-..."
+```
+
+Available presets: `recommended` (auto-select), `light` (lightweight local), `cloud` (cloud API).
 
 ### 3. Project Setup (once per project)
 
@@ -87,17 +108,21 @@ Claude automatically remembers your preferences, technical decisions, and projec
 
 Each project's memories are isolated from one another, while global memories (personal preferences, general rules) are shared. During search, project and global memories are ranked together by relevance score — no artificial caps on either source.
 
-### Smart Search
+### Smart Memory Management
 
-Wide candidate retrieval → relevance threshold filtering → TTL time filtering → sort by score descending → truncate and return. Each result includes a relevance score. Search parameters are fully configurable.
+- **Scene-driven tool selection**: 5 mandatory rules ensure Claude uses the right memory tool at the right time
+- **Conflict detection**: When modifying existing architecture/decisions, automatically searches and updates related memories instead of creating duplicates
+- **Search pipeline**: Wide candidate retrieval → relevance threshold filtering → TTL filtering → score sorting → truncation
+- **Optional reranking**: Supports Reranker (sentence-transformer / LLM / Cohere) for secondary ranking after vector retrieval
 
 ### Multiple Provider Support
 
 | Type | Available Providers |
 |------|-------------------|
-| LLM | Ollama, OpenAI, Anthropic, LiteLLM, Custom |
-| Embedder | Ollama, OpenAI, LiteLLM, Custom |
-| Vector Store | Qdrant (Docker / Local) |
+| LLM | Ollama, OpenAI, Anthropic, LiteLLM |
+| Embedder | Ollama, OpenAI, LiteLLM |
+| Vector Store | Qdrant (Docker / Local / External) |
+| Reranker | sentence-transformer, LLM, Cohere, HuggingFace (optional) |
 
 ### Async Writes & Auto GC
 
@@ -105,7 +130,7 @@ Memory writes are executed asynchronously via a background queue, never blocking
 
 ### Memory Rule Injection
 
-During installation, 3 mandatory memory rules are written to `~/.claude/CLAUDE.md`, ensuring Claude proactively searches and stores memories in every session.
+During installation, 5 mandatory memory rules are written to `~/.claude/CLAUDE.md`, covering all 6 tools (search / add / update / delete / list / history), ensuring Claude proactively manages memories in every session.
 
 ## MCP Tools
 
@@ -115,14 +140,24 @@ After installation, Claude Code can operate on memories through these MCP tools:
 |------|-------------|---------------|
 | `memory_search` | Semantic memory search | `query`, `project`, `days`, `top_k` |
 | `memory_add` | Add memory (auto dedup & merge) | `text`, `project`, `metadata` |
-| `memory_list` | List all memories | `project`, `days` |
+| `memory_update` | Update existing memory content | `memory_id`, `text` |
 | `memory_delete` | Delete a specific memory | `memory_id` |
+| `memory_list` | List all memories | `project`, `days` |
+| `memory_history` | View memory change history | `memory_id` |
 
-> These tools are called automatically by Claude — you typically don't need to invoke them manually.
+> These tools are called automatically by Claude based on memory rules — you typically don't need to invoke them manually.
 
 ## Configuration
 
-Config file is located at `~/.agent-mem0/config.yaml`, using a **shadow config** approach: the code has built-in defaults for all fields, and the user config file only needs to specify the fields you want to override.
+Config file location varies by platform:
+
+| Platform | Config Directory | Data Directory | Log Directory |
+|----------|-----------------|----------------|---------------|
+| macOS | `~/Library/Application Support/agent-mem0/` | Same as config | `~/Library/Logs/agent-mem0/` |
+| Linux | `~/.config/agent-mem0/` | `~/.local/share/agent-mem0/` | `~/.local/state/agent-mem0/log/` |
+| Windows | `%APPDATA%\agent-mem0\` | `%LOCALAPPDATA%\agent-mem0\` | `%LOCALAPPDATA%\agent-mem0\Logs\` |
+
+Uses a **shadow config** approach: the code has built-in defaults for all fields, and the user config file only needs to specify the fields you want to override.
 
 ### Common Scenarios
 
@@ -174,32 +209,28 @@ memory:
   default_ttl_days: 30    # Memory retention period in days
 ```
 
+**Enable Reranker (optional):**
+
+```yaml
+reranker:
+  provider: sentence_transformer
+  config:
+    model: cross-encoder/ms-marco-MiniLM-L-6-v2
+    top_k: 10
+```
+
+Requires extra install: `pip install agent-mem0[reranker]`
+
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
 | `agent-mem0 install` | Global install wizard: configure providers, storage, memory rules |
+| `agent-mem0 install --default` | Non-interactive mode: auto-detect hardware, use recommended config |
 | `agent-mem0 setup` | Project-level setup: write MCP config and Skill |
 | `agent-mem0 status` | Show system status: Qdrant connection, provider config, memory stats |
 | `agent-mem0 uninstall` | Uninstall: remove config and artifacts, preserve memory data |
 | `agent-mem0 uninstall --purge` | Full uninstall: also delete memory data and Docker container |
-
-## Data Safety
-
-agent-mem0 strictly separates **regenerable config** from **irreplaceable user data**:
-
-```
-~/.agent-mem0/              <- Config (regenerable, just re-run install)
-  ├── config.yaml
-  ├── projects.json
-  └── logs/
-
-~/.local/share/agent-mem0/  <- User memory data (irreplaceable)
-  └── qdrant_storage/
-```
-
-- `agent-mem0 uninstall`: only removes config and artifacts, **never touches memory data**
-- `agent-mem0 uninstall --purge`: also deletes memory data and Docker container, requires **double confirmation**
 
 ## FAQ
 
