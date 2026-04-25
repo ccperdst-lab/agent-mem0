@@ -44,6 +44,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "search_top_k": 20,
         "search_threshold": 0.3,
         "search_max_results": 10,
+        "custom_instructions": (
+            "Prefer preserving decision rationale (WHY) over factual descriptions (WHAT). "
+            "Preserve timestamps when merging memories. "
+            "Do not store generic technical knowledge (e.g., syntax, stdlib APIs)."
+        ),
+    },
+    "reranker": {
+        "provider": "none",  # none / sentence_transformer / llm_reranker / cohere / huggingface
+        "config": {},
     },
     "log": {
         "level": "info",
@@ -283,5 +292,27 @@ def build_mem0_config(config: dict[str, Any], project: str) -> dict[str, Any]:
         data_path = Path(vs_cfg.get("data_path", "~/.local/share/agent-mem0")).expanduser()
         vs_section["config"]["path"] = str(data_path / "qdrant_storage")
     mem0_config["vector_store"] = vs_section
+
+    # Custom instructions for mem0 memory extraction
+    mem_cfg = config.get("memory", {})
+    custom_instructions = mem_cfg.get("custom_instructions", "")
+    if custom_instructions:
+        mem0_config["custom_instructions"] = custom_instructions
+
+    # Reranker config passthrough to mem0
+    reranker_cfg = config.get("reranker", {})
+    reranker_provider = reranker_cfg.get("provider", "none")
+    if reranker_provider != "none":
+        reranker_inner = dict(reranker_cfg.get("config", {}) or {})
+        # LLM inheritance: when llm_reranker has no explicit LLM config, inherit from main
+        if reranker_provider == "llm_reranker" and "provider" not in reranker_inner:
+            reranker_inner.setdefault("provider", llm_cfg["provider"])
+            reranker_inner.setdefault("model", llm_cfg["model"])
+            if llm_cfg.get("api_key"):
+                reranker_inner.setdefault("api_key", llm_cfg["api_key"])
+        mem0_config["reranker"] = {
+            "provider": reranker_provider,
+            "config": reranker_inner,
+        }
 
     return mem0_config

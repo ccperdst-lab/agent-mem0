@@ -19,7 +19,9 @@ def setup_logger(config: dict) -> logging.Logger:
     level_str = log_cfg.get("level", "info").upper()
     max_bytes = log_cfg.get("max_size_mb", 10) * 1024 * 1024
     max_files = log_cfg.get("max_files", 3)
-    log_path = Path(log_cfg.get("path", "~/.agent-mem0/logs/agent-mem0.log")).expanduser()
+    from agent_mem0.config import AGENT_MEM0_HOME  # Lazy: avoid circular import
+    default_log = str(AGENT_MEM0_HOME / "logs" / "agent-mem0.log")
+    log_path = Path(log_cfg.get("path", default_log)).expanduser()
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
 

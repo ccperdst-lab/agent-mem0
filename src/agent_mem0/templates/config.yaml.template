@@ -122,12 +122,46 @@
 #   合并排序后取前 N 条，项目和全局记忆按 score 公平竞争
 #   默认: 10
 #
+# custom_instructions: mem0 记忆提取自定义指令
+#   控制 mem0 内部 LLM 如何提取、合并记忆。
+#   传入 mem0 的 MemoryConfig(custom_instructions=...)
+#   留空表示使用代码内置的默认指令（优先保留决策原因，保留时间戳，不存储通用技术知识）
+#   设为空字符串可完全禁用自定义指令
+#
 # memory:
 #   default_ttl_days: 30
 #   gc_threshold: 20
 #   search_top_k: 20
 #   search_threshold: 0.3
 #   search_max_results: 10
+#   custom_instructions: ""
+
+# ── Reranker 配置 ──────────────────────────────────────────────
+# 搜索精排，透传给 mem0 的 RerankerConfig。
+# 启用后 memory_search 会在向量检索后用 reranker 精排，提升结果质量。
+#
+# provider: reranker 提供商
+#   可选值: none / sentence_transformer / llm_reranker / cohere / huggingface
+#   - none: 禁用精排（默认，行为与当前一致）
+#   - sentence_transformer: 轻量级 cross-encoder 模型（需安装 pip install agent-mem0[reranker]）
+#   - llm_reranker: 使用 LLM 做精排（较重，但效果好）
+#   - cohere: Cohere Rerank API
+#   - huggingface: HuggingFace 模型
+#
+# config: 透传给 mem0 RerankerConfig.config 的参数
+#   sentence_transformer 示例:
+#     model: cross-encoder/ms-marco-MiniLM-L-6-v2
+#     top_k: 10
+#   llm_reranker 说明:
+#     当 config 中未指定 provider/model/api_key 时，自动从主 LLM 配置继承
+#     如需使用不同的 LLM，可显式配置:
+#     provider: openai
+#     model: gpt-4o-mini
+#     api_key: sk-xxx
+#
+# reranker:
+#   provider: none
+#   config: {}
 
 # ── 日志配置 ─────────────────────────────────────────────────────
 # MCP Server 的运行日志，用于调试和问题排查。

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from mcp.server.fastmcp import FastMCP
 
 from agent_mem0.config import build_mem0_config, load_config
+from agent_mem0.server.timeout import call_with_timeout
 from agent_mem0.logger import (
     log_conflict,
     log_debug,
@@ -28,6 +29,7 @@ _search_top_k: int = 20
 _search_threshold: float = 0.3
 _search_max_results: int = 10
 _mcp = FastMCP("agent-memory")
+_rerank_enabled: bool = False
 _write_worker: _WriteWorker | None = None
 _gc_buffer: _GCBuffer | None = None
 
@@ -99,6 +101,13 @@ class _GCBuffer:
             return flushed
 
 
+def _make_error(e: Exception) -> str:
+    """Format exception as JSON error response, with timeout flag if applicable."""
+    if isinstance(e, TimeoutError):
+        return json.dumps({"error": str(e), "timeout": True}, ensure_ascii=False)
+    return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
 def _check_project(project: str) -> str | None:
     """Validate project access. Returns error message or None if OK."""
     allowed = {_locked_project, "global"}
@@ -134,6 +143,39 @@ def _filter_by_time(memories: list[dict], days: int) -> tuple[list[dict], list[s
     return filtered, expired_ids
 
 
+def _execute_search(query: str, project: str) -> list[dict]:
+    """Run mem0 search for project (and global if applicable), return merged results."""
+    search_kwargs = {"top_k": _search_top_k}
+    if _search_threshold > 0:
+        search_kwargs["threshold"] = _search_threshold
+    if _rerank_enabled:
+        search_kwargs["rerank"] = True
+
+    results: list[dict] = []
+    for user_id in ([project, "global"] if project != "global" else [project]):
+        raw = call_with_timeout(
+            _memory.search, query, filters={"user_id": user_id},
+            timeout=30, **search_kwargs,
+        )
+        if isinstance(raw, dict) and "results" in raw:
+            results.extend(raw["results"])
+        elif isinstance(raw, list):
+            results.extend(raw)
+    return results
+
+
+def _maybe_gc(expired_ids: list[str], project: str) -> None:
+    """Feed expired IDs to GC buffer and flush if threshold reached."""
+    if not expired_ids or _gc_buffer is None:
+        return
+    _gc_buffer.add(expired_ids)
+    log_debug(f"GC buffer: added {len(expired_ids)} expired IDs")
+    to_delete = _gc_buffer.flush_if_ready()
+    if to_delete and _write_worker is not None:
+        log_memory_op("GC_TRIGGER", project, f"flushing {len(to_delete)} expired memories")
+        _write_worker.enqueue(_do_gc_delete, to_delete)
+
+
 @_mcp.tool()
 def memory_search(query: str, project: str = "", days: int = 0, top_k: int = 0) -> str:
     """搜索记忆。默认搜索当前项目和全局记忆。
@@ -146,76 +188,33 @@ def memory_search(query: str, project: str = "", days: int = 0, top_k: int = 0) 
     """
     if not project:
         project = _locked_project
-
     error = _check_project(project)
     if error:
         return json.dumps({"error": error}, ensure_ascii=False)
-
     if days <= 0:
         days = _default_ttl_days
-
     max_results = top_k if top_k > 0 else _search_max_results
 
     start = time.time()
     try:
-        results = []
-
-        search_kwargs = {"top_k": _search_top_k}
-        if _search_threshold > 0:
-            search_kwargs["threshold"] = _search_threshold
-
-        # Search within the specified project
-        project_results = _memory.search(
-            query, filters={"user_id": project}, **search_kwargs,
-        )
-        if isinstance(project_results, dict) and "results" in project_results:
-            results.extend(project_results["results"])
-        elif isinstance(project_results, list):
-            results.extend(project_results)
-
-        # Also search global if project is not global
-        if project != "global":
-            global_results = _memory.search(
-                query, filters={"user_id": "global"}, **search_kwargs,
-            )
-            if isinstance(global_results, dict) and "results" in global_results:
-                results.extend(global_results["results"])
-            elif isinstance(global_results, list):
-                results.extend(global_results)
-
+        results = _execute_search(query, project)
         results, expired_ids = _filter_by_time(results, days)
-
-        # Unified score-based ranking: sort by score descending, then truncate
         results.sort(key=lambda r: r.get("score", 0.0), reverse=True)
         results = results[:max_results]
-
-        # Feed expired IDs to GC buffer
-        if expired_ids and _gc_buffer is not None:
-            _gc_buffer.add(expired_ids)
-            log_debug(f"GC buffer: added {len(expired_ids)} expired IDs")
-            to_delete = _gc_buffer.flush_if_ready()
-            if to_delete and _write_worker is not None:
-                log_memory_op("GC_TRIGGER", project, f"flushing {len(to_delete)} expired memories")
-                _write_worker.enqueue(_do_gc_delete, to_delete)
+        _maybe_gc(expired_ids, project)
 
         elapsed = time.time() - start
         log_memory_op("SEARCH", project, f"query=\"{query}\" results={len(results)} time={elapsed:.2f}s")
-        log_debug(f"Search details: query=\"{query}\" project={project} days={days} raw={json.dumps(results, ensure_ascii=False, default=str)}")
+        log_debug(f"Search details: query=\"{query}\" project={project} days={days}")
 
-        # Return compact format with score
         compact = [
-            {
-                "id": r["id"],
-                "memory": r.get("memory", ""),
-                "project": r.get("user_id", ""),
-                "score": round(r.get("score", 0.0), 4),
-            }
+            {"id": r["id"], "memory": r.get("memory", ""), "project": r.get("user_id", ""), "score": round(r.get("score", 0.0), 4)}
             for r in results
         ]
         return json.dumps({"memories": compact, "count": len(compact)}, ensure_ascii=False)
     except Exception as e:
         log_error(f"Search failed: {e}")
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
+        return _make_error(e)
 
 
 def _do_gc_delete(ids: list[str]) -> None:
@@ -224,7 +223,7 @@ def _do_gc_delete(ids: list[str]) -> None:
     failed = 0
     for mid in ids:
         try:
-            _memory.delete(mid)
+            call_with_timeout(_memory.delete, mid, timeout=15)
             deleted += 1
         except Exception as e:
             log_error(f"GC delete failed for {mid}: {e}")
@@ -236,7 +235,9 @@ def _do_gc_delete(ids: list[str]) -> None:
 def _do_memory_add(text: str, project: str, meta: dict) -> None:
     """Actual memory write operation, executed in background worker."""
     start = time.time()
-    result = _memory.add(text, user_id=project, metadata=meta)
+    result = call_with_timeout(
+        _memory.add, text, user_id=project, metadata=meta, timeout=60,
+    )
     elapsed = time.time() - start
 
     # Log the operation and any conflicts
@@ -308,14 +309,18 @@ def memory_list(project: str = "", days: int = 0) -> str:
     try:
         results = []
 
-        project_mems = _memory.get_all(filters={"user_id": project})
+        project_mems = call_with_timeout(
+            _memory.get_all, filters={"user_id": project}, timeout=30,
+        )
         if isinstance(project_mems, dict) and "results" in project_mems:
             results.extend(project_mems["results"])
         elif isinstance(project_mems, list):
             results.extend(project_mems)
 
         if project != "global":
-            global_mems = _memory.get_all(filters={"user_id": "global"})
+            global_mems = call_with_timeout(
+                _memory.get_all, filters={"user_id": "global"}, timeout=30,
+            )
             if isinstance(global_mems, dict) and "results" in global_mems:
                 results.extend(global_mems["results"])
             elif isinstance(global_mems, list):
@@ -334,7 +339,7 @@ def memory_list(project: str = "", days: int = 0) -> str:
         return json.dumps({"memories": compact, "count": len(compact)}, ensure_ascii=False)
     except Exception as e:
         log_error(f"List failed: {e}")
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
+        return _make_error(e)
 
 
 @_mcp.tool()
@@ -345,18 +350,60 @@ def memory_delete(memory_id: str) -> str:
         memory_id: 记忆的 ID
     """
     try:
-        _memory.delete(memory_id)
+        call_with_timeout(_memory.delete, memory_id, timeout=15)
         log_memory_op("DELETE", _locked_project, f"id={memory_id}")
         return json.dumps({"status": "deleted", "memory_id": memory_id}, ensure_ascii=False)
     except Exception as e:
         log_error(f"Delete failed: {e}")
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
+        return _make_error(e)
+
+
+@_mcp.tool()
+def memory_update(memory_id: str, text: str) -> str:
+    """修正一条已有记忆的内容。
+
+    Args:
+        memory_id: 记忆的 ID
+        text: 新的记忆内容
+    """
+    try:
+        call_with_timeout(_memory.update, memory_id, text, timeout=60)
+        log_memory_op("UPDATE", _locked_project, f"id={memory_id} text=\"{text[:50]}...\"")
+        return json.dumps({"status": "updated", "memory_id": memory_id}, ensure_ascii=False)
+    except Exception as e:
+        log_error(f"Update failed: {e}")
+        return _make_error(e)
+
+
+@_mcp.tool()
+def memory_history(memory_id: str) -> str:
+    """查看一条记忆的变更历史。
+
+    Args:
+        memory_id: 记忆的 ID
+    """
+    try:
+        raw = call_with_timeout(_memory.history, memory_id, timeout=15)
+        log_memory_op("HISTORY", _locked_project, f"id={memory_id} entries={len(raw) if isinstance(raw, list) else '?'}")
+        history = []
+        if isinstance(raw, list):
+            for entry in raw:
+                history.append({
+                    "event": entry.get("event", ""),
+                    "old_memory": entry.get("old_memory", ""),
+                    "new_memory": entry.get("new_memory", ""),
+                    "timestamp": entry.get("created_at", ""),
+                })
+        return json.dumps({"history": history}, ensure_ascii=False)
+    except Exception as e:
+        log_error(f"History failed: {e}")
+        return _make_error(e)
 
 
 def run_server(project: str) -> None:
     """Initialize and run the MCP Server."""
     global _memory, _locked_project, _default_ttl_days, _write_worker, _gc_buffer
-    global _search_top_k, _search_threshold, _search_max_results
+    global _search_top_k, _search_threshold, _search_max_results, _rerank_enabled
 
     config = load_config()
     setup_logger(config)
@@ -368,6 +415,9 @@ def run_server(project: str) -> None:
     _search_threshold = mem_cfg.get("search_threshold", 0.3)
     _search_max_results = mem_cfg.get("search_max_results", 10)
     gc_threshold = mem_cfg.get("gc_threshold", 20)
+
+    reranker_provider = config.get("reranker", {}).get("provider", "none")
+    _rerank_enabled = reranker_provider != "none"
 
     log_debug(f"Starting MCP Server: project={project}")
 
